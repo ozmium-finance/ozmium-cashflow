@@ -1,0 +1,83 @@
+-- | Checkpoint 3: entitlement / waterfall calculation.
+--
+-- Given a validated revenue event, calculate how the net distributable
+-- amount splits across token holders. Pro-rata by ownership share is the
+-- demo-scope waterfall (Dev Build Guide: "start simple — pro-rata is fine
+-- for the demo"); the EntitlementCalculation/EntitlementLine shape is
+-- deliberately generic so a real waterfall (seniority tranches, hurdle
+-- rates, promote/carry) can replace the pro-rata split later without
+-- changing the contracts up- or downstream of it.
+--
+-- No contract keys here either (Canton 3.x doesn't support them):
+-- HoldingsSnapshot and EntitlementCalculation are looked up by ContractId,
+-- passed explicitly through the choices that need them.
+module Ozmium.Entitlement where
+
+import DA.Action (forA)
+import Ozmium.Types
+import Ozmium.Settlement
+
+-- | Snapshot of token-holder ownership for an asset, used to compute
+-- pro-rata entitlement. In production this mirrors CIP-56 holdings read
+-- from Canton/Hedera at distribution time; for the demo it is attested
+-- directly onto the ledger by the fund. Keeping it as its own contract
+-- (rather than a field on ValidatedRevenueEvent) is what keeps the
+-- cashflow logic chain-agnostic: swapping this for a live holdings read
+-- doesn't touch Attestation/Validation/Settlement at all.
+template HoldingsSnapshot
+  with
+    fund     : Party
+    assetId  : Text
+    holdings : [(Party, Decimal)]  -- (holder, ownership share); shares must sum to 1.0
+  where
+    signatory fund
+    observer [h | (h, _) <- holdings]
+
+    ensure sumDecimals [pct | (_, pct) <- holdings] == 1.0
+
+-- | Itemized entitlement calculated for one validated revenue event.
+-- Both fund and attestor remain signatories through this stage so the
+-- provenance chain (which attested event produced this calculation) is
+-- part of the ledger record, not just implied by a foreign key.
+template EntitlementCalculation
+  with
+    fund              : Party
+    attestor          : Party
+    assetId           : Text
+    revenueType       : RevenueType
+    periodStart       : Date
+    periodEnd         : Date
+    currency          : Text
+    netDistributable  : Decimal
+    lines             : [EntitlementLine]
+    sourceRef         : Text
+  where
+    signatory fund, attestor
+    observer [l.holder | l <- lines]
+
+    -- Checkpoint 4: turn each entitlement line into an on-ledger
+    -- settlement obligation. See Ozmium.Settlement.
+    choice EntitlementCalculation_Settle : [ContractId SettlementInstruction]
+      controller fund
+      do
+        forA lines $ \l ->
+          create SettlementInstruction with
+            fund
+            holder = l.holder
+            assetId
+            periodStart
+            periodEnd
+            currency
+            amount = l.amount
+            sourceEventRef = sourceRef
+            status = Pending
+
+-- | Pure calculation helper, exposed so tests can check the math directly
+-- without going through the ledger. Decimal is exact fixed-point, so
+-- pro-rata splits of a clean net amount against clean percentages come
+-- out exact for the demo's numbers.
+calculateEntitlementLines : Decimal -> [(Party, Decimal)] -> [EntitlementLine]
+calculateEntitlementLines net holdings =
+  [ EntitlementLine with holder = h, share = pct, amount = net * pct
+  | (h, pct) <- holdings
+  ]

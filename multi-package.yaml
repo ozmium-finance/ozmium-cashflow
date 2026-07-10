@@ -1,0 +1,8 @@
+# Lets `dpm build --all` (and other multi-package-aware dpm commands)
+# discover and build all three packages in this repo in the right order,
+# instead of building each one by hand. See each package's daml.yaml for
+# why they're split up this way.
+packages:
+  - .
+  - tests/scenarios
+  - integration/mock-attestor

@@ -1,0 +1,114 @@
+-- | Checkpoint 1 (Attestation) + the bridge into Checkpoint 2 (Validation).
+--
+-- A RevenueAttestation is a signed claim by an accountable party — the
+-- regulated attestor (property manager, servicer, custodian) — that a
+-- real-world economic event occurred: "€X was collected for property Y in
+-- period Z". This is the required, primary trust model for the Mission
+-- build (Mission Brief: "regulated attestor model ... is the root of trust
+-- ... non-negotiable"). Oracle corroboration (Ozmium.Oracle) is additive
+-- and lives in a separate module entirely.
+--
+-- Field shape intentionally mirrors the attestation schema drafted in the
+-- Revenue Attestation Architecture doc (asset_id, period_start/end,
+-- revenue_type, gross_amount, currency, deductions, source_reference),
+-- so the mock attestor integration can submit a near-literal translation
+-- of that JSON payload as a create command.
+--
+-- NOTE on contract keys: Canton 3.x (the live Global Synchronizer
+-- Mainnet, and what "Canton Network" means for this Mission as of mid-2026)
+-- does not support Daml contract keys -- no `key`, `maintainer`,
+-- `fetchByKey`, `lookupByKey`, `exerciseByKey`. Uniqueness enforcement is
+-- fundamentally incompatible with Canton's multi-synchronizer
+-- architecture (confirmed by Digital Asset engineering on the Canton
+-- Network Forum, "Contract keys in DAML 3", May 2025). This module was
+-- originally written against Daml 2.x semantics using contract keys for
+-- duplicate-period protection; see Attestation_Validate below for how
+-- that's handled instead.
+module Ozmium.Attestation where
+
+import DA.Action (forA_)
+import DA.Assert
+import Ozmium.Types
+import Ozmium.Validation
+
+template RevenueAttestation
+  with
+    attestor     : Party
+    fund         : Party
+    assetId      : Text
+    revenueType  : RevenueType
+    periodStart  : Date
+    periodEnd    : Date
+    grossAmount  : Decimal
+    currency     : Text
+    deductions   : [Deduction]
+    sourceRef    : Text
+  where
+    -- signatory attestor is what makes "an unauthorized party cannot
+    -- create one" true: only a party submitting *as* attestor can bring
+    -- this contract into existence. The ledger enforces this structurally
+    -- — there is no application-level check to bypass.
+    signatory attestor
+    observer fund
+
+    ensure grossAmount > 0.0 && periodEnd >= periodStart
+
+    -- Checkpoint 2: validate this attestation against the trust model and,
+    -- if it passes, promote it to a ValidatedRevenueEvent. Controlled by
+    -- `fund` because in this model the fund (or its validation agent) is
+    -- the party relying on the registry to decide whether to accept the
+    -- claim — the attestor's authority carries over automatically since
+    -- this choice consumes a contract for which attestor is signatory.
+    choice Attestation_Validate : ContractId ValidatedRevenueEvent
+      with
+        registryCid : ContractId AttestorRegistry
+        -- Without contract keys, the ledger can no longer prove on its own
+        -- that no ValidatedRevenueEvent already exists for this period —
+        -- see the DA-recommended pattern in the Canton Network Forum
+        -- thread cited above. The primary defense is off-ledger: the
+        -- fund's automation layer should query the participant (JSON API
+        -- or PQS) for an existing ValidatedRevenueEvent matching this
+        -- fund/asset/period *before* submitting this choice, and simply
+        -- not submit if one is found. As on-ledger defense-in-depth, the
+        -- caller can also pass ContractIds of any ValidatedRevenueEvents
+        -- it already knows about for this asset; this choice will fetch
+        -- each one and hard-fail if any matches this exact period. Pass
+        -- [] if the caller has no prior events to check (e.g. the very
+        -- first period for a new asset).
+        knownPriorEventCids : [ContractId ValidatedRevenueEvent]
+      controller fund
+      do
+        registry <- fetch registryCid
+        registry.fund === fund
+        assertMsg
+          ("Registry is for asset " <> registry.assetId <> ", not " <> assetId)
+          (registry.assetId == assetId)
+        assertMsg
+          ("Attestor " <> show attestor <> " is not the registered attestor for asset " <> assetId)
+          (registry.authorizedAttestor == attestor)
+
+        forA_ knownPriorEventCids $ \priorCid -> do
+          priorEvent <- fetch priorCid
+          assertMsg
+            ("Revenue event for asset " <> assetId <> " and this period has already been validated (found via knownPriorEventCids)")
+            (not (priorEvent.fund == fund
+                  && priorEvent.assetId == assetId
+                  && priorEvent.periodStart == periodStart
+                  && priorEvent.periodEnd == periodEnd))
+
+        let totalDeductions = sumDecimals [d.amount | d <- deductions]
+        let net = grossAmount - totalDeductions
+        assertMsg "Net distributable amount must be positive after deductions" (net > 0.0)
+
+        create ValidatedRevenueEvent with
+          attestor
+          fund
+          assetId
+          revenueType
+          periodStart
+          periodEnd
+          grossAmount
+          currency
+          deductions
+          netDistributable = net
+          sourceRef

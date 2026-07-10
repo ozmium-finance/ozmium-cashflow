@@ -1,0 +1,51 @@
+-- | STRETCH GOAL — oracle corroboration (optional).
+--
+-- Kept in a clearly separate module from day one, per the Dev Build
+-- Guide, so it can be left out of the demo entirely without touching
+-- Attestation.daml, Validation.daml, Entitlement.daml, or Settlement.daml.
+-- Nothing in the core modules imports this one.
+--
+-- Scope, per the Mission Brief: only attempt this for an event type where
+-- independent public data genuinely exists to corroborate against — a
+-- bond coupon rate against a published rate is the example given. This is
+-- deliberately NOT wired up for the real estate rent use case, which has
+-- no independent public data source (rent rolls are private, bespoke
+-- facts — see the Revenue Attestation Architecture doc's discussion of
+-- why Model B / oracle corroboration is additive, not a replacement, for
+-- Model A / the regulated attestor).
+--
+-- This models a Chainlink-style oracle network as a single reporting
+-- party for simplicity; a real integration would aggregate multiple
+-- independent nodes before posting the corroboration on-chain.
+module Ozmium.Oracle where
+
+data CorroborationStatus
+  = Confirmed
+  | Mismatch
+  deriving (Eq, Show)
+
+-- | A publicly-sourced reference value (e.g. a bond's published coupon
+-- rate) that can confirm or flag a mismatch against an attestor's claim,
+-- without altering or gating the core attestation/validation/entitlement/
+-- settlement flow in any way. This is a corroboration signal, not a
+-- second required approval — the core flow does not check for or wait on
+-- an OracleCorroboration contract to exist.
+template OracleCorroboration
+  with
+    oracle        : Party
+    fund          : Party
+    bondId        : Text
+    periodStart   : Date
+    periodEnd     : Date
+    publishedRate : Decimal  -- e.g. coupon rate from a prospectus / published benchmark
+    attestedRate  : Decimal  -- the rate claimed in the corresponding RevenueAttestation
+    toleranceBps  : Decimal  -- acceptable deviation, in basis points (e.g. 1.0 = 1bp)
+  where
+    signatory oracle
+    observer fund
+
+    choice OracleCorroboration_Check : CorroborationStatus
+      controller fund
+      do
+        let diffBps = abs (publishedRate - attestedRate) * 10000.0
+        pure $ if diffBps <= toleranceBps then Confirmed else Mismatch

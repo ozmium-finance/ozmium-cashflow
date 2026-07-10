@@ -1,0 +1,100 @@
+-- | Trust-model validation: the regulated-attestor model that is the
+-- required, non-negotiable root of trust for the Mission build (Mission
+-- Brief, "The Trust Question"). An attestation only becomes a
+-- ValidatedRevenueEvent — and can only then flow into entitlement
+-- calculation and settlement — if it passes these checks:
+--
+--   1. Right party: the attestor is the one registered as authoritative
+--      for this specific asset (AttestorRegistry lookup).
+--   2. Right signature/authority: enforced structurally by the ledger —
+--      RevenueAttestation requires `signatory attestor`, so a contract
+--      claiming to be from a given attestor can only exist if that party
+--      actually authorized it.
+--   3. Not already reported for that period: Canton 3.x has no contract
+--      keys, so this is now primarily an off-ledger check with on-ledger
+--      defense-in-depth -- see Attestation_Validate in Attestation.daml
+--      for the knownPriorEventCids mechanism and rationale.
+module Ozmium.Validation where
+
+import Ozmium.Types
+import Ozmium.Entitlement
+
+-- | Registry of which party is authorized to attest revenue events for a
+-- given asset. Maintained by an admin/governance party.
+--
+-- Single admin key is sufficient for the demo; the Revenue Attestation
+-- Architecture doc flags that production governance for this registry
+-- (multi-sig / committee, since it is the actual trust root of the whole
+-- system) is an open legal/design question, not a technical one.
+template AttestorRegistry
+  with
+    admin              : Party
+    fund               : Party
+    assetId            : Text
+    authorizedAttestor : Party
+  where
+    signatory admin
+    observer fund, authorizedAttestor
+
+    choice AttestorRegistry_Replace : ContractId AttestorRegistry
+      with
+        newAttestor : Party
+      controller admin
+      do
+        create this with authorizedAttestor = newAttestor
+
+-- | A revenue event that has passed trust-model validation. This is the
+-- boundary contract between "someone claimed X happened" (RevenueAttestation)
+-- and "Ozmium's logic now treats X as fact and will calculate money against
+-- it" (EntitlementCalculation, Settlement). Both attestor and fund are
+-- signatories: the attestor's original claim and the fund's (or its
+-- validation agent's) acceptance of that claim under the trust model.
+template ValidatedRevenueEvent
+  with
+    attestor          : Party
+    fund              : Party
+    assetId           : Text
+    revenueType       : RevenueType
+    periodStart       : Date
+    periodEnd         : Date
+    grossAmount       : Decimal
+    currency          : Text
+    deductions        : [Deduction]
+    netDistributable  : Decimal
+    sourceRef         : Text
+  where
+    signatory attestor, fund
+
+    ensure netDistributable > 0.0
+
+    -- Checkpoint 3: calculate entitlements across token holders against a
+    -- holdings snapshot. Controller fund because the fund is the party
+    -- whose obligation this ultimately is; attestor's authority carries
+    -- over from the consumed ValidatedRevenueEvent (signatory attestor,
+    -- fund), matching EntitlementCalculation's own signatories exactly.
+    choice ValidatedRevenueEvent_CalculateEntitlement : ContractId EntitlementCalculation
+      with
+        holdingsCid : ContractId HoldingsSnapshot
+      controller fund
+      do
+        holdingsSnapshot <- fetch holdingsCid
+        assertMsg
+          ("Holdings snapshot is for asset " <> holdingsSnapshot.assetId <> ", not " <> assetId)
+          (holdingsSnapshot.assetId == assetId)
+        assertMsg
+          "Holdings snapshot belongs to a different fund"
+          (holdingsSnapshot.fund == fund)
+
+        let lines = calculateEntitlementLines netDistributable holdingsSnapshot.holdings
+
+        create EntitlementCalculation with
+          fund
+          attestor
+          assetId
+          revenueType
+          periodStart
+          periodEnd
+          currency
+          netDistributable
+          lines
+          sourceRef

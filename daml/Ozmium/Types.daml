@@ -1,0 +1,45 @@
+-- | Shared data types for the Ozmium cashflow contract pattern.
+--
+-- Kept asset-class agnostic on purpose: the same RevenueType/Deduction/
+-- EntitlementLine shapes are meant to serve real estate rent today and
+-- bonds/private-credit coupon and loan-repayment events in phase two,
+-- per the Mission Brief's use-case sequencing.
+module Ozmium.Types where
+
+-- | The kind of economic event being attested. `Other` is an escape hatch
+-- for asset classes not yet modeled explicitly (funds/PE distributions,
+-- infrastructure revenue, etc. — see the Revenue Attestation Architecture
+-- doc's asset-class breakdown).
+data RevenueType
+  = Rent
+  | Coupon
+  | LoanRepayment
+  | Distribution
+  | Other
+  deriving (Eq, Show)
+
+-- | A single itemized deduction against gross revenue (management fee,
+-- servicing fee, etc.). Deductions are kept itemized rather than netted
+-- upstream so the programmable waterfall logic stays visible on-ledger —
+-- see "Deductions itemized, not netted upstream" in the Revenue
+-- Attestation Architecture doc.
+data Deduction = Deduction
+  with
+    deductionType : Text
+    amount        : Decimal
+  deriving (Eq, Show)
+
+-- | One line of a computed entitlement: how much of the net distributable
+-- amount a given token holder is owed, and the ownership share used to
+-- compute it.
+data EntitlementLine = EntitlementLine
+  with
+    holder : Party
+    share  : Decimal
+    amount : Decimal
+  deriving (Eq, Show)
+
+-- | Sum of a list of Decimals. Small helper so calculation modules don't
+-- each need to reimplement it.
+sumDecimals : [Decimal] -> Decimal
+sumDecimals = foldl (+) 0.0
