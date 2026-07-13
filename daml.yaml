@@ -8,6 +8,11 @@
 # get.digitalasset.com rather than get.daml.com. See README.md's
 # "Contract keys and Canton 3.x" section for why the templates in this
 # package don't use `key`/`maintainer`.
+#
+# NOTE: pin this to whatever `dpm --version` / `dpm sdk list` reports as
+# latest on your machine -- 3.5.3 was the latest stable release as of
+# this writing (June 2026); verify locally since this environment
+# couldn't reach get.digitalasset.com to confirm or install it.
 sdk-version: 3.5.3
 name: ozmium-cashflow
 source: daml

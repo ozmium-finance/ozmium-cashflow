@@ -1,0 +1,25 @@
+# Test suite package. Kept separate from the main daml.yaml (per the Dev
+# Build Guide's repo layout, tests live in their own top-level folder) and
+# depends on the *compiled* main package via data-dependencies, rather than
+# being folded into daml/ as extra modules.
+#
+# Build order matters:
+#   1. From the repo root:            dpm build
+#   2. From this directory:           dpm test
+#
+# Step 1 must run first so ../../.daml/dist/ozmium-cashflow-0.1.0.dar
+# exists for this package's data-dependency to resolve. If you bump the
+# main package's version in the root daml.yaml, update the dar filename
+# below to match. (A multi-package.yaml at the repo root also lets you
+# run `dpm build --all` from there instead of building each package by
+# hand -- see that file for details.)
+sdk-version: 3.5.3
+name: ozmium-cashflow-tests
+source: .
+version: 0.1.0
+dependencies:
+  - daml-prim
+  - daml-stdlib
+  - daml-script
+data-dependencies:
+  - ../../.daml/dist/ozmium-cashflow-0.1.0.dar

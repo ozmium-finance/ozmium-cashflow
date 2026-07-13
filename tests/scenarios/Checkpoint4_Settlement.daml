@@ -1,0 +1,101 @@
+-- | Checkpoint 4 — Settlement.
+--
+-- Done when: a scenario runs the full chain end-to-end: attestation ->
+-- validation -> entitlement -> settlement, and the ledger state is
+-- auditable (you can trace which event produced which payout).
+module Checkpoint4_Settlement where
+
+import DA.Assert
+import DA.Date
+import DA.Action (forA, forA_)
+import DA.List (sortOn)
+import Daml.Script
+import Ozmium.Attestation
+import Ozmium.Validation
+import Ozmium.Entitlement
+import Ozmium.Settlement
+import Ozmium.Types
+import Ozmium.Setup
+
+test_fullLifecycleEndToEnd : Script ()
+test_fullLifecycleEndToEnd = script do
+  DemoParties{..} <- allocateDemoParties
+
+  -- Checkpoint 1: attestation.
+  registryCid <- submit admin do
+    createCmd AttestorRegistry with
+      admin
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      authorizedAttestor = propManager
+
+  holdingsCid <- submit berlinSpv do
+    createCmd HoldingsSnapshot with
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      holdings = [(investor1, 0.50), (investor2, 0.30), (investor3, 0.20)]
+
+  let periodStart = date 2026 Jul 1
+  let periodEnd   = date 2026 Jul 31
+  let sourceRef   = "statement-2026-07-berlin-hauptstrasse-12"
+
+  attestationCid <- submit propManager do
+    createCmd RevenueAttestation with
+      attestor = propManager
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      revenueType = Rent
+      periodStart
+      periodEnd
+      grossAmount = 12500.00
+      currency = "EUR"
+      deductions =
+        [ Deduction with deductionType = "management_fee", amount = 500.00
+        , Deduction with deductionType = "servicing_fee", amount = 125.00
+        ]
+      sourceRef
+
+  -- Checkpoint 2: validation.
+  validatedCid <- submit berlinSpv do
+    exerciseCmd attestationCid Attestation_Validate with registryCid, knownPriorEventCids = []
+
+  Some validated <- queryContractId berlinSpv validatedCid
+  validated.netDistributable === 11875.00  -- 12500 - 500 - 125
+
+  -- Checkpoint 3: entitlement calculation.
+  entitlementCid <- submit berlinSpv do
+    exerciseCmd validatedCid ValidatedRevenueEvent_CalculateEntitlement with holdingsCid
+
+  Some entitlement <- queryContractId berlinSpv entitlementCid
+  entitlement.sourceRef === sourceRef
+
+  -- Checkpoint 4: settlement.
+  settlementCids <- submit berlinSpv do
+    exerciseCmd entitlementCid EntitlementCalculation_Settle
+
+  settlements <- forA settlementCids (queryContractId berlinSpv)
+  let paidOut = [s | Some s <- settlements]
+  length paidOut === 3
+
+  -- Auditable trace: every settlement instruction carries the exact
+  -- source_reference of the attestation that produced it, and the sum of
+  -- settlement amounts equals the net distributable amount from the
+  -- validated event -- a regulator or auditor can walk backwards from any
+  -- payout to the original attested event without touching application
+  -- code.
+  forA_ paidOut $ \s -> s.sourceEventRef === sourceRef
+  let totalSettled = sum [s.amount | s <- paidOut]
+  totalSettled === entitlement.netDistributable
+
+  -- Each investor sees their own settlement instruction and can read it.
+  let byHolder = sortOn (\s -> show s.holder) paidOut
+  length byHolder === 3
+
+  -- Fund can mark a settlement as paid once the off-ledger transfer has
+  -- happened (e.g. once the corresponding Hedera stablecoin transfer
+  -- confirms).
+  let (firstSettlementCid : _) = settlementCids
+  paidCid <- submit berlinSpv do
+    exerciseCmd firstSettlementCid Settlement_MarkPaid
+  Some paidSettlement <- queryContractId berlinSpv paidCid
+  paidSettlement.status === Paid

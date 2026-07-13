@@ -1,0 +1,16 @@
+{
+  "asset_id": "berlin-hauptstrasse-12",
+  "period_start": "2026-07-01",
+  "period_end": "2026-07-31",
+  "revenue_type": "rent",
+  "gross_amount": 12500.00,
+  "currency": "EUR",
+  "deductions": [
+    { "type": "management_fee", "amount": 500.00 },
+    { "type": "servicing_fee", "amount": 125.00 }
+  ],
+  "net_distributable": 11875.00,
+  "attestor_id": "PropManagerCo",
+  "source_reference": "statement-2026-07-berlin-hauptstrasse-12",
+  "timestamp": "2026-08-01T00:00:00Z"
+}

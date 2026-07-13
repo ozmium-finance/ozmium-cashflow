@@ -1,0 +1,59 @@
+-- | Stretch goal — Oracle corroboration.
+--
+-- Done when: Oracle.daml adds a corroboration step that can confirm or
+-- flag a mismatch against the attestor's claim, without altering the
+-- core attestation/validation/entitlement/settlement flow.
+--
+-- Scoped to a bond coupon rate, per the Mission Brief -- NOT the real
+-- estate rent use case, which has no independent public data source.
+-- Note this module imports only Ozmium.Oracle: it does not touch, wire
+-- into, or depend on Attestation/Validation/Entitlement/Settlement at
+-- all, demonstrating the separation the Dev Build Guide asks for.
+module Stretch_OracleCorroboration where
+
+import DA.Assert
+import DA.Date
+import Daml.Script
+import Ozmium.Oracle
+
+test_oracleConfirmsMatchingRate : Script ()
+test_oracleConfirmsMatchingRate = script do
+  chainlinkOracle <- allocatePartyWithHint "ChainlinkOracle" (PartyIdHint "ChainlinkOracle")
+  bondFund <- allocatePartyWithHint "BondFundSPV" (PartyIdHint "BondFundSPV")
+
+  corroborationCid <- submit chainlinkOracle do
+    createCmd OracleCorroboration with
+      oracle = chainlinkOracle
+      fund = bondFund
+      bondId = "acme-corp-2029-bond"
+      periodStart = date 2026 Jul 1
+      periodEnd = date 2026 Dec 31
+      publishedRate = 0.0475     -- 4.75%, from the published prospectus
+      attestedRate = 0.0475      -- what the paying agent's attestation claimed
+      toleranceBps = 1.0
+
+  status <- submit bondFund do
+    exerciseCmd corroborationCid OracleCorroboration_Check
+
+  status === Confirmed
+
+test_oracleFlagsMismatch : Script ()
+test_oracleFlagsMismatch = script do
+  chainlinkOracle <- allocatePartyWithHint "ChainlinkOracle" (PartyIdHint "ChainlinkOracle")
+  bondFund <- allocatePartyWithHint "BondFundSPV" (PartyIdHint "BondFundSPV")
+
+  corroborationCid <- submit chainlinkOracle do
+    createCmd OracleCorroboration with
+      oracle = chainlinkOracle
+      fund = bondFund
+      bondId = "acme-corp-2029-bond"
+      periodStart = date 2026 Jul 1
+      periodEnd = date 2026 Dec 31
+      publishedRate = 0.0475     -- published rate says 4.75%
+      attestedRate = 0.0525      -- paying agent's attestation claims 5.25% -- flag it
+      toleranceBps = 1.0
+
+  status <- submit bondFund do
+    exerciseCmd corroborationCid OracleCorroboration_Check
+
+  status === Mismatch

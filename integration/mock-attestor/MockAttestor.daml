@@ -1,0 +1,64 @@
+-- | Daml Script alternative to submit_attestation.py.
+--
+-- Same purpose (simulate the property manager's system submitting a
+-- signed revenue event) but runs directly against a ledger via
+-- `dpm script`, without needing the JSON API + JWT setup. This is the
+-- fastest path for a live demo; use submit_attestation.py instead when
+-- you want to show the "external system calling in over HTTP" story.
+--
+-- Compiled as its own package (see daml.yaml in this directory) that
+-- depends on the main ozmium-cashflow dar. Build the main package first,
+-- then this one, then run against a running `dpm sandbox`:
+--   dpm build                                    # from repo root
+--   dpm sandbox --dar .daml/dist/ozmium-cashflow-0.1.0.dar --json-api-port 7575
+--   cd integration/mock-attestor && dpm build     # from here, in another terminal
+--   dpm script \
+--     --dar .daml/dist/ozmium-mock-attestor-0.1.0.dar \
+--     --script-name MockAttestor:runMockAttestation \
+--     --ledger-host localhost --ledger-port 6865
+-- See README.md in this directory for the full walkthrough.
+module MockAttestor where
+
+import DA.Date
+import DA.List (find)
+import Daml.Script
+import Ozmium.Attestation
+import Ozmium.Types
+
+-- | Looks up an already-allocated party by display-name hint (as created
+-- by Ozmium.Setup:setup against a running ledger); falls back to
+-- allocating a fresh one if none is found, so this script also works
+-- standalone against an empty ledger.
+getOrAllocateParty : Text -> Script Party
+getOrAllocateParty hint = do
+  known <- listKnownParties
+  case find (\p -> p.displayName == Some hint) known of
+    Some p -> pure p.party
+    None -> allocatePartyWithHint hint (PartyIdHint hint)
+
+-- | Mirrors attestation_sample.json. Looks up parties already allocated
+-- by Ozmium.Setup:setup on the target ledger (falling back to allocating
+-- them if this is run against an empty ledger).
+runMockAttestation : Script ()
+runMockAttestation = do
+  propManager <- getOrAllocateParty "PropManagerCo"
+  berlinSpv   <- getOrAllocateParty "BerlinSPV"
+
+  attestationCid <- submit propManager do
+    createCmd RevenueAttestation with
+      attestor = propManager
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      revenueType = Rent
+      periodStart = date 2026 Jul 1
+      periodEnd = date 2026 Jul 31
+      grossAmount = 12500.00
+      currency = "EUR"
+      deductions =
+        [ Deduction with deductionType = "management_fee", amount = 500.00
+        , Deduction with deductionType = "servicing_fee", amount = 125.00
+        ]
+      sourceRef = "statement-2026-07-berlin-hauptstrasse-12"
+
+  debug ("Submitted attestation: " <> show attestationCid)
+  pure ()

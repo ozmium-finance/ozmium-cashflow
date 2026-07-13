@@ -1,0 +1,117 @@
+-- | Checkpoint 3 — Entitlement calculation.
+--
+-- Done when: a scenario with 2-3 token holders produces correct,
+-- itemized entitlement amounts.
+module Checkpoint3_Entitlement where
+
+import DA.Assert
+import DA.Date
+import Daml.Script
+import Ozmium.Attestation
+import Ozmium.Validation
+import Ozmium.Entitlement
+import Ozmium.Types
+import Ozmium.Setup
+
+test_entitlementSplitsProRataAcrossThreeHolders : Script ()
+test_entitlementSplitsProRataAcrossThreeHolders = script do
+  DemoParties{..} <- allocateDemoParties
+
+  registryCid <- submit admin do
+    createCmd AttestorRegistry with
+      admin
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      authorizedAttestor = propManager
+
+  holdingsCid <- submit berlinSpv do
+    createCmd HoldingsSnapshot with
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      holdings = [(investor1, 0.50), (investor2, 0.30), (investor3, 0.20)]
+
+  attestationCid <- submit propManager do
+    createCmd RevenueAttestation with
+      attestor = propManager
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      revenueType = Rent
+      periodStart = date 2026 Jul 1
+      periodEnd = date 2026 Jul 31
+      grossAmount = 12500.00
+      currency = "EUR"
+      deductions =
+        [ Deduction with deductionType = "management_fee", amount = 500.00 ]
+      sourceRef = "statement-2026-07"
+
+  validatedCid <- submit berlinSpv do
+    exerciseCmd attestationCid Attestation_Validate with registryCid, knownPriorEventCids = []
+
+  entitlementCid <- submit berlinSpv do
+    exerciseCmd validatedCid ValidatedRevenueEvent_CalculateEntitlement with holdingsCid
+
+  Some entitlement <- queryContractId berlinSpv entitlementCid
+  -- net = 12500 - 500 = 12000; split 50/30/20
+  entitlement.netDistributable === 12000.00
+  entitlement.lines ===
+    [ EntitlementLine with holder = investor1, share = 0.50, amount = 6000.00
+    , EntitlementLine with holder = investor2, share = 0.30, amount = 3600.00
+    , EntitlementLine with holder = investor3, share = 0.20, amount = 2400.00
+    ]
+
+-- Two-holder case, exercising a different split (60/40) to make sure the
+-- calculation isn't accidentally hardcoded to three parties.
+test_entitlementSplitsAcrossTwoHolders : Script ()
+test_entitlementSplitsAcrossTwoHolders = script do
+  DemoParties{..} <- allocateDemoParties
+
+  registryCid <- submit admin do
+    createCmd AttestorRegistry with
+      admin
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      authorizedAttestor = propManager
+
+  holdingsCid <- submit berlinSpv do
+    createCmd HoldingsSnapshot with
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      holdings = [(investor1, 0.60), (investor2, 0.40)]
+
+  attestationCid <- submit propManager do
+    createCmd RevenueAttestation with
+      attestor = propManager
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      revenueType = Rent
+      periodStart = date 2026 Aug 1
+      periodEnd = date 2026 Aug 31
+      grossAmount = 10000.00
+      currency = "EUR"
+      deductions = []
+      sourceRef = "statement-2026-08"
+
+  validatedCid <- submit berlinSpv do
+    exerciseCmd attestationCid Attestation_Validate with registryCid, knownPriorEventCids = []
+
+  entitlementCid <- submit berlinSpv do
+    exerciseCmd validatedCid ValidatedRevenueEvent_CalculateEntitlement with holdingsCid
+
+  Some entitlement <- queryContractId berlinSpv entitlementCid
+  entitlement.lines ===
+    [ EntitlementLine with holder = investor1, share = 0.60, amount = 6000.00
+    , EntitlementLine with holder = investor2, share = 0.40, amount = 4000.00
+    ]
+
+-- A holdings snapshot whose shares don't sum to 1.0 is rejected by the
+-- template's `ensure` clause — guards against silently mis-splitting
+-- money due to a bad data feed.
+test_holdingsSnapshotMustSumToOne : Script ()
+test_holdingsSnapshotMustSumToOne = script do
+  DemoParties{..} <- allocateDemoParties
+
+  submitMustFail berlinSpv do
+    createCmd HoldingsSnapshot with
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      holdings = [(investor1, 0.50), (investor2, 0.30)]  -- sums to 0.80
