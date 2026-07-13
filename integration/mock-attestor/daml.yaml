@@ -1,10 +1,9 @@
-# MockAttestor.daml is compiled as its own tiny package (same reasoning as
-# tests/scenarios/daml.yaml) so it can be run with `dpm script` against a
-# live sandbox/participant without pulling the demo-integration code into
-# the main contract package.
+# Same deal as tests/scenarios/daml.yaml — its own package so
+# MockAttestor.daml can run via `dpm script` without the demo-integration
+# code ending up inside the main contract package.
 #
-# Build order: `dpm build` at the repo root first, then `dpm build` here
-# (or `dpm build --all` from the repo root, see multi-package.yaml).
+# Build the repo root first, then this one (`dpm build --all` from the
+# root does both, see multi-package.yaml).
 sdk-version: 3.5.3
 name: ozmium-mock-attestor
 source: .

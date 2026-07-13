@@ -1,16 +1,16 @@
--- | Checkpoint 4: settlement.
+-- | Checkpoint 4 — settlement.
 --
--- A SettlementInstruction represents, on-ledger, the fund's obligation to
--- pay a specific holder a specific amount for a specific event. It does
--- not move real funds — per the Dev Build Guide, "representing the
--- obligation on-ledger is enough" for the demo. In production this is
--- where a DvP-style payout would be triggered on the token/settlement
--- rail (Hedera HTS, or any other chain — Canton orchestrates the money
--- movement, it does not care which chain the underlying token lives on).
+-- SettlementInstruction is just the fund's obligation to pay a holder a
+-- specific amount for a specific event, written on-ledger. No real money
+-- moves here — the build guide only asks for the obligation to exist
+-- on-ledger, not an actual payout rail. In a real build this is the spot
+-- where you'd trigger a DvP payout on Hedera or wherever the token
+-- happens to live — Canton's job is orchestrating the money, not caring
+-- which chain the token was issued on.
 --
--- No contract key: Canton 3.x doesn't support them. Callers look up a
--- SettlementInstruction by ContractId (returned when
--- EntitlementCalculation_Settle is exercised) or via a ledger query.
+-- No contract key on this one either. Whoever needs a
+-- SettlementInstruction gets its ContractId back from
+-- EntitlementCalculation_Settle, or queries for it.
 module Ozmium.Settlement where
 
 data SettlementStatus
@@ -27,10 +27,8 @@ template SettlementInstruction
     periodEnd      : Date
     currency       : Text
     amount         : Decimal
-    -- Traces back to the originating attestation's source_reference, so a
-    -- regulator or auditor can walk SettlementInstruction -> the exact
-    -- event that produced it, per the "auditable" requirement in the
-    -- Mission Brief and Exhibit A acceptance criteria.
+    -- Points back to the attestation's source_reference so an auditor
+    -- can trace a payout all the way back to the event that caused it.
     sourceEventRef : Text
     status         : SettlementStatus
   where
@@ -39,10 +37,10 @@ template SettlementInstruction
 
     ensure amount > 0.0
 
-    -- Marks the obligation as paid once the off-ledger (or Hedera-side)
-    -- transfer has actually happened. Kept as a controller-only choice for
-    -- the fund in this demo; a real deployment would likely want the
-    -- holder or a payment-rail oracle to co-confirm receipt.
+    -- Flip to Paid once the actual transfer has happened, off-ledger.
+    -- Fund-controlled for now; you'd probably want the holder or some
+    -- payment oracle to co-sign this in a real deployment so the fund
+    -- can't just mark things paid without anyone checking.
     choice Settlement_MarkPaid : ContractId SettlementInstruction
       controller fund
       do

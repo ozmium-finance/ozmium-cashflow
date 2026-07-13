@@ -1,18 +1,14 @@
 # Ozmium Cashflow — Canton Mission build
 #
-# Targets Daml 3.5.x, matching the live Canton Network (Global
-# Synchronizer Mainnet), which has been on Daml 3.x for about a year as of
-# mid-2026 and does not support the classic `daml` CLI / Daml Assistant
-# (removed as of the 3.5 SDK release) or contract keys. Tooling is now
-# DPM (Digital Asset Package Manager), installed from
-# get.digitalasset.com rather than get.daml.com. See README.md's
-# "Contract keys and Canton 3.x" section for why the templates in this
-# package don't use `key`/`maintainer`.
+# Targets Daml 3.5.x, since that's what the live Canton Network actually
+# runs these days. That means no `daml` CLI (gone as of 3.5, use `dpm`
+# from get.digitalasset.com instead) and no contract keys — see the
+# "Contract keys and Canton 3.x" bit in README.md for why none of the
+# templates in here use key/maintainer.
 #
-# NOTE: pin this to whatever `dpm --version` / `dpm sdk list` reports as
-# latest on your machine -- 3.5.3 was the latest stable release as of
-# this writing (June 2026); verify locally since this environment
-# couldn't reach get.digitalasset.com to confirm or install it.
+# sdk-version below was the latest stable as of writing (June 2026) —
+# double check with `dpm sdk list` since I couldn't hit
+# get.digitalasset.com from here to confirm it.
 sdk-version: 3.5.3
 name: ozmium-cashflow
 source: daml

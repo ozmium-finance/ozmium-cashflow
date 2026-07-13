@@ -1,12 +1,11 @@
 # Mock Attestor
 
-Simulates a property manager's system submitting a signed revenue event,
-so the live demo doesn't depend on typing `dpm script` commands on stage
+Stands in for a property manager's system sending in a signed revenue
+event, so we're not typing `dpm script` commands live on stage
 (Checkpoint 5 in the Dev Build Guide).
 
-Two interchangeable ways to run it — pick whichever fits the demo better.
-Both assume Daml 3.5.x tooling (`dpm`, not the deprecated `daml` CLI —
-see the root README's "Toolchain" section).
+Two ways to run it, pick whichever fits. Both assume Daml 3.5.x tooling
+(`dpm`, not the old `daml` CLI — see "Toolchain" in the root README).
 
 ## Option A — Daml Script (fastest, no extra setup)
 
@@ -22,23 +21,22 @@ dpm script \
   --ledger-host localhost --ledger-port 6865
 ```
 
-Start a sandbox first (in another terminal), from the repo root:
+Start a sandbox first, in another terminal, from the repo root:
 
 ```bash
 dpm sandbox --dar .daml/dist/ozmium-cashflow-0.1.0.dar --json-api-port 7575
 ```
 
-`MockAttestor.daml`'s `getOrAllocateParty` looks up `PropManagerCo`/
-`BerlinSPV` by display name if `Ozmium.Setup:setup` has already been run
-against this sandbox (see root README), falling back to allocating fresh
-parties otherwise — either way it works standalone.
+`getOrAllocateParty` in `MockAttestor.daml` looks for `PropManagerCo`/
+`BerlinSPV` by name if `Ozmium.Setup:setup` already ran on this sandbox,
+and allocates them fresh if not. Works either way, no extra setup needed.
 
 ## Option B — Python over the JSON API (closer to a real integration)
 
-Shows the "external property-management system calls into Ozmium over
-HTTP" story more literally. Requires the sandbox's JSON API enabled
-(`dpm sandbox --dar <dar> --json-api-port 7575`, as above) and a JWT for
-the attestor party.
+This one actually shows the "external system calls into Ozmium over
+HTTP" story instead of just asserting it. Needs the sandbox's JSON API
+turned on (`dpm sandbox --dar <dar> --json-api-port 7575`, same as
+above) plus a JWT for the attestor party.
 
 ```bash
 pip install requests
@@ -48,9 +46,8 @@ python3 submit_attestation.py attestation_sample.json \
   --jwt-file ./propmanager.jwt
 ```
 
-For local sandbox testing (not production!), `dpm sandbox` accepts
-unsigned/test JWTs with the right claims by default. A minimal token
-payload:
+For local testing, `dpm sandbox` will accept unsigned test JWTs with the
+right claims. Minimal payload:
 
 ```json
 {
@@ -62,30 +59,31 @@ payload:
 }
 ```
 
-Check current Digital Asset docs (`docs.digitalasset.com`, JSON Ledger
-API section) for the exact claim namespace and token format expected by
-your `dpm sandbox` version — this has historically varied across SDK
-versions and wasn't independently verified against a live install here.
-For authenticated sandbox runs, `dpm sandbox --config auth.conf` is the
-3.5.x equivalent of the old `--auth-jwt-hs256-unsafe` flag; see
-`dpm sandbox --help`.
+That `https://daml.com/ledger-api` key isn't a real link, by the way —
+it's just how the claim gets namespaced in the JWT, same idea as an XML
+namespace URI. Don't go looking for a page there.
+
+Worth double-checking this against current Digital Asset docs
+(`docs.digitalasset.com`, JSON Ledger API section) since the exact claim
+format has moved around across SDK versions and I couldn't verify it
+against a live install from here. For authenticated runs,
+`dpm sandbox --config auth.conf` replaces the old
+`--auth-jwt-hs256-unsafe` flag — check `dpm sandbox --help`.
 
 ## `attestation_sample.json`
 
-Field shape mirrors the schema drafted in the Revenue Attestation
-Architecture doc. One deliberate omission: no `attestor_signature` field
-— on Canton/Daml the ledger itself enforces that only the attestor party
-can author a `RevenueAttestation` (see `signatory attestor` in
-`Attestation.daml`), so the JWT/party authority used to submit the
-command *is* the signature. A bolt-on signature field would just
-duplicate what the ledger already guarantees structurally.
+Shaped like the schema in the Revenue Attestation Architecture doc, with
+one thing left out on purpose: no `attestor_signature` field. Canton
+already enforces that only the attestor can create a `RevenueAttestation`
+(`signatory attestor` in `Attestation.daml`), so the JWT you're
+authenticating with already does that job — a signature field on top
+would just be duplicating what the ledger guarantees for free.
 
 ## No contract keys
 
-If you're wiring this into a real attestation pipeline: there's no
-`AttestorRegistry`/`ValidatedRevenueEvent` lookup-by-key available on
-Canton 3.x. Your automation layer needs to track the relevant
-ContractIds itself (from create/exercise results, or by querying the
-JSON API/PQS) — see the root README's "Contract keys and Canton 3.x"
-section for the full explanation and the `knownPriorEventCids` mechanism
-this integration should feed when calling `Attestation_Validate`.
+If you end up wiring this into something real: there's no key-based
+lookup for `AttestorRegistry` or `ValidatedRevenueEvent` on Canton 3.x.
+Whatever's automating this needs to keep track of ContractIds itself —
+from create/exercise results, or by querying the JSON API/PQS. See
+"Contract keys and Canton 3.x" in the root README for the full story and
+what `knownPriorEventCids` is for when calling `Attestation_Validate`.

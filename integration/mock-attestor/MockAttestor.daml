@@ -1,22 +1,20 @@
--- | Daml Script alternative to submit_attestation.py.
+-- | Daml Script version of submit_attestation.py — same idea (simulate
+-- the property manager's system sending in a signed event), but goes
+-- straight at the ledger via `dpm script` instead of the JSON API. Use
+-- this one when you just want the demo to work; use the Python script
+-- when you want to actually show the "external system calling in over
+-- HTTP" bit.
 --
--- Same purpose (simulate the property manager's system submitting a
--- signed revenue event) but runs directly against a ledger via
--- `dpm script`, without needing the JSON API + JWT setup. This is the
--- fastest path for a live demo; use submit_attestation.py instead when
--- you want to show the "external system calling in over HTTP" story.
---
--- Compiled as its own package (see daml.yaml in this directory) that
--- depends on the main ozmium-cashflow dar. Build the main package first,
--- then this one, then run against a running `dpm sandbox`:
+-- This is its own little package (see daml.yaml here) depending on the
+-- main dar. Build order:
 --   dpm build                                    # from repo root
 --   dpm sandbox --dar .daml/dist/ozmium-cashflow-0.1.0.dar --json-api-port 7575
---   cd integration/mock-attestor && dpm build     # from here, in another terminal
+--   cd integration/mock-attestor && dpm build     # in another terminal
 --   dpm script \
 --     --dar .daml/dist/ozmium-mock-attestor-0.1.0.dar \
 --     --script-name MockAttestor:runMockAttestation \
 --     --ledger-host localhost --ledger-port 6865
--- See README.md in this directory for the full walkthrough.
+-- More detail in README.md next to this file.
 module MockAttestor where
 
 import DA.Date
@@ -25,10 +23,9 @@ import Daml.Script
 import Ozmium.Attestation
 import Ozmium.Types
 
--- | Looks up an already-allocated party by display-name hint (as created
--- by Ozmium.Setup:setup against a running ledger); falls back to
--- allocating a fresh one if none is found, so this script also works
--- standalone against an empty ledger.
+-- | Finds a party by display name if Ozmium.Setup:setup already ran on
+-- this ledger, otherwise just allocates one. Lets this script work
+-- either way without caring which.
 getOrAllocateParty : Text -> Script Party
 getOrAllocateParty hint = do
   known <- listKnownParties
@@ -36,9 +33,8 @@ getOrAllocateParty hint = do
     Some p -> pure p.party
     None -> allocatePartyWithHint hint (PartyIdHint hint)
 
--- | Mirrors attestation_sample.json. Looks up parties already allocated
--- by Ozmium.Setup:setup on the target ledger (falling back to allocating
--- them if this is run against an empty ledger).
+-- | Same numbers as attestation_sample.json, just hardcoded here instead
+-- of read from a file.
 runMockAttestation : Script ()
 runMockAttestation = do
   propManager <- getOrAllocateParty "PropManagerCo"

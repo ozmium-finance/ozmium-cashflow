@@ -1,29 +1,26 @@
--- | Checkpoint 1 (Attestation) + the bridge into Checkpoint 2 (Validation).
+-- | Checkpoint 1 — attestation. Also has the choice that bridges into
+-- Checkpoint 2 (validation), since it made more sense to keep that logic
+-- next to the contract it consumes rather than splitting it out.
 --
--- A RevenueAttestation is a signed claim by an accountable party — the
--- regulated attestor (property manager, servicer, custodian) — that a
--- real-world economic event occurred: "€X was collected for property Y in
--- period Z". This is the required, primary trust model for the Mission
--- build (Mission Brief: "regulated attestor model ... is the root of trust
--- ... non-negotiable"). Oracle corroboration (Ozmium.Oracle) is additive
--- and lives in a separate module entirely.
+-- A RevenueAttestation is just a signed claim: "attestor says €X came in
+-- for property Y, period Z". The attestor is a property manager, a
+-- servicer, whoever's contractually on the hook for the number being
+-- right. This is the trust model the Mission brief says is required —
+-- oracle corroboration (Ozmium.Oracle) is a nice-to-have on top, not a
+-- substitute, and it lives in its own module entirely so it can't leak
+-- into this one.
 --
--- Field shape intentionally mirrors the attestation schema drafted in the
--- Revenue Attestation Architecture doc (asset_id, period_start/end,
--- revenue_type, gross_amount, currency, deductions, source_reference),
--- so the mock attestor integration can submit a near-literal translation
--- of that JSON payload as a create command.
+-- Field names roughly follow the attestation JSON schema from the
+-- Revenue Attestation Architecture doc, mostly so the mock attestor
+-- integration doesn't have to do much translation.
 --
--- NOTE on contract keys: Canton 3.x (the live Global Synchronizer
--- Mainnet, and what "Canton Network" means for this Mission as of mid-2026)
--- does not support Daml contract keys -- no `key`, `maintainer`,
--- `fetchByKey`, `lookupByKey`, `exerciseByKey`. Uniqueness enforcement is
--- fundamentally incompatible with Canton's multi-synchronizer
--- architecture (confirmed by Digital Asset engineering on the Canton
--- Network Forum, "Contract keys in DAML 3", May 2025). This module was
--- originally written against Daml 2.x semantics using contract keys for
--- duplicate-period protection; see Attestation_Validate below for how
--- that's handled instead.
+-- One thing worth flagging up front: this file used to use Daml contract
+-- keys for duplicate-period protection, back when it was written against
+-- Daml 2.x assumptions. Canton 3.x dropped contract keys entirely — no
+-- key/maintainer/fetchByKey/lookupByKey/exerciseByKey, confirmed by DA
+-- engineering on the Canton forum ("Contract keys in DAML 3") — because
+-- you can't guarantee uniqueness across independent synchronizers. See
+-- Attestation_Validate below for what replaced it.
 module Ozmium.Attestation where
 
 import DA.Action (forA_)
@@ -44,37 +41,31 @@ template RevenueAttestation
     deductions   : [Deduction]
     sourceRef    : Text
   where
-    -- signatory attestor is what makes "an unauthorized party cannot
-    -- create one" true: only a party submitting *as* attestor can bring
-    -- this contract into existence. The ledger enforces this structurally
-    -- — there is no application-level check to bypass.
+    -- `signatory attestor` is doing all the work for "an unauthorized
+    -- party can't create one" — nobody but attestor can bring this
+    -- contract into existence, full stop, nothing to check on our end.
     signatory attestor
     observer fund
 
     ensure grossAmount > 0.0 && periodEnd >= periodStart
 
-    -- Checkpoint 2: validate this attestation against the trust model and,
-    -- if it passes, promote it to a ValidatedRevenueEvent. Controlled by
-    -- `fund` because in this model the fund (or its validation agent) is
-    -- the party relying on the registry to decide whether to accept the
-    -- claim — the attestor's authority carries over automatically since
-    -- this choice consumes a contract for which attestor is signatory.
+    -- Checkpoint 2 lives here: validate against the trust model, and if
+    -- it holds up, turn this into a ValidatedRevenueEvent. `fund` is the
+    -- controller since they're the one deciding whether to trust the
+    -- registry's answer. attestor's authority just comes along for the
+    -- ride because we're consuming a contract they signed.
     choice Attestation_Validate : ContractId ValidatedRevenueEvent
       with
         registryCid : ContractId AttestorRegistry
-        -- Without contract keys, the ledger can no longer prove on its own
-        -- that no ValidatedRevenueEvent already exists for this period —
-        -- see the DA-recommended pattern in the Canton Network Forum
-        -- thread cited above. The primary defense is off-ledger: the
-        -- fund's automation layer should query the participant (JSON API
-        -- or PQS) for an existing ValidatedRevenueEvent matching this
-        -- fund/asset/period *before* submitting this choice, and simply
-        -- not submit if one is found. As on-ledger defense-in-depth, the
-        -- caller can also pass ContractIds of any ValidatedRevenueEvents
-        -- it already knows about for this asset; this choice will fetch
-        -- each one and hard-fail if any matches this exact period. Pass
-        -- [] if the caller has no prior events to check (e.g. the very
-        -- first period for a new asset).
+        -- No contract keys means the ledger can't prove by itself that
+        -- this period hasn't been validated before. The real fix is
+        -- off-ledger: whoever's submitting this (the fund's automation)
+        -- should check the participant/PQS for an existing
+        -- ValidatedRevenueEvent first and just not submit if it finds
+        -- one. This param is the on-ledger backstop for that — pass in
+        -- any ValidatedRevenueEvent ids you already know about for this
+        -- asset and we'll fetch them and fail hard if one matches this
+        -- period. Pass [] if there's nothing to check yet.
         knownPriorEventCids : [ContractId ValidatedRevenueEvent]
       controller fund
       do

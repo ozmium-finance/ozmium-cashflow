@@ -1,14 +1,13 @@
--- | Stretch goal — Oracle corroboration.
+-- | Stretch goal — oracle corroboration.
 --
--- Done when: Oracle.daml adds a corroboration step that can confirm or
--- flag a mismatch against the attestor's claim, without altering the
--- core attestation/validation/entitlement/settlement flow.
+-- Done when: it can confirm or flag a mismatch against an attestor's
+-- claim, without touching the core flow at all.
 --
--- Scoped to a bond coupon rate, per the Mission Brief -- NOT the real
--- estate rent use case, which has no independent public data source.
--- Note this module imports only Ozmium.Oracle: it does not touch, wire
--- into, or depend on Attestation/Validation/Entitlement/Settlement at
--- all, demonstrating the separation the Dev Build Guide asks for.
+-- Bond coupon rate only, per the Mission Brief — not real estate rent,
+-- which has no public data to check against. Notice this file only
+-- imports Ozmium.Oracle. Nothing here touches
+-- Attestation/Validation/Entitlement/Settlement, which is really the
+-- whole point of keeping this module separate in the first place.
 module Stretch_OracleCorroboration where
 
 import DA.Assert

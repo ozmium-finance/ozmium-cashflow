@@ -1,8 +1,8 @@
--- | Checkpoint 4 — Settlement.
+-- | Checkpoint 4 — settlement, and the full chain end to end.
 --
--- Done when: a scenario runs the full chain end-to-end: attestation ->
--- validation -> entitlement -> settlement, and the ledger state is
--- auditable (you can trace which event produced which payout).
+-- Done when: attestation -> validation -> entitlement -> settlement runs
+-- all the way through, and you can trace any payout back to the event
+-- that caused it.
 module Checkpoint4_Settlement where
 
 import DA.Assert
@@ -21,7 +21,7 @@ test_fullLifecycleEndToEnd : Script ()
 test_fullLifecycleEndToEnd = script do
   DemoParties{..} <- allocateDemoParties
 
-  -- Checkpoint 1: attestation.
+  -- checkpoint 1: attestation
   registryCid <- submit admin do
     createCmd AttestorRegistry with
       admin
@@ -55,21 +55,21 @@ test_fullLifecycleEndToEnd = script do
         ]
       sourceRef
 
-  -- Checkpoint 2: validation.
+  -- checkpoint 2: validation
   validatedCid <- submit berlinSpv do
     exerciseCmd attestationCid Attestation_Validate with registryCid, knownPriorEventCids = []
 
   Some validated <- queryContractId berlinSpv validatedCid
   validated.netDistributable === 11875.00  -- 12500 - 500 - 125
 
-  -- Checkpoint 3: entitlement calculation.
+  -- checkpoint 3: entitlement calculation
   entitlementCid <- submit berlinSpv do
     exerciseCmd validatedCid ValidatedRevenueEvent_CalculateEntitlement with holdingsCid
 
   Some entitlement <- queryContractId berlinSpv entitlementCid
   entitlement.sourceRef === sourceRef
 
-  -- Checkpoint 4: settlement.
+  -- checkpoint 4: settlement
   settlementCids <- submit berlinSpv do
     exerciseCmd entitlementCid EntitlementCalculation_Settle
 
@@ -77,23 +77,21 @@ test_fullLifecycleEndToEnd = script do
   let paidOut = [s | Some s <- settlements]
   length paidOut === 3
 
-  -- Auditable trace: every settlement instruction carries the exact
-  -- source_reference of the attestation that produced it, and the sum of
-  -- settlement amounts equals the net distributable amount from the
-  -- validated event -- a regulator or auditor can walk backwards from any
-  -- payout to the original attested event without touching application
-  -- code.
+  -- this is the auditability check that matters: every settlement
+  -- carries the source_reference back to the attestation that caused
+  -- it, and the total settled matches the validated event's net amount
+  -- exactly. someone auditing this later shouldn't need anything but
+  -- the ledger to walk a payout back to its source event.
   forA_ paidOut $ \s -> s.sourceEventRef === sourceRef
   let totalSettled = sum [s.amount | s <- paidOut]
   totalSettled === entitlement.netDistributable
 
-  -- Each investor sees their own settlement instruction and can read it.
+  -- each investor should be able to see their own instruction
   let byHolder = sortOn (\s -> show s.holder) paidOut
   length byHolder === 3
 
-  -- Fund can mark a settlement as paid once the off-ledger transfer has
-  -- happened (e.g. once the corresponding Hedera stablecoin transfer
-  -- confirms).
+  -- and the fund can mark one paid once the actual transfer clears
+  -- (e.g. a Hedera stablecoin transfer confirming on the other side)
   let (firstSettlementCid : _) = settlementCids
   paidCid <- submit berlinSpv do
     exerciseCmd firstSettlementCid Settlement_MarkPaid

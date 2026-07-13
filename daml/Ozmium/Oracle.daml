@@ -1,22 +1,18 @@
--- | STRETCH GOAL — oracle corroboration (optional).
+-- | STRETCH GOAL — oracle corroboration. Optional, and kept in its own
+-- module on purpose so it can be dropped entirely without touching
+-- Attestation/Validation/Entitlement/Settlement. None of those import
+-- this file.
 --
--- Kept in a clearly separate module from day one, per the Dev Build
--- Guide, so it can be left out of the demo entirely without touching
--- Attestation.daml, Validation.daml, Entitlement.daml, or Settlement.daml.
--- Nothing in the core modules imports this one.
+-- Only makes sense for event types where a real public number exists to
+-- check against — a bond's published coupon rate is the example in the
+-- Mission brief. We're deliberately not wiring this up for real estate
+-- rent, because there's no independent source for what rent actually
+-- came in. Someone still has to be the attestor either way; an oracle
+-- can corroborate a claim, it can't discover the fact on its own.
 --
--- Scope, per the Mission Brief: only attempt this for an event type where
--- independent public data genuinely exists to corroborate against — a
--- bond coupon rate against a published rate is the example given. This is
--- deliberately NOT wired up for the real estate rent use case, which has
--- no independent public data source (rent rolls are private, bespoke
--- facts — see the Revenue Attestation Architecture doc's discussion of
--- why Model B / oracle corroboration is additive, not a replacement, for
--- Model A / the regulated attestor).
---
--- This models a Chainlink-style oracle network as a single reporting
--- party for simplicity; a real integration would aggregate multiple
--- independent nodes before posting the corroboration on-chain.
+-- Modeled here as a single reporting party for simplicity — a real
+-- Chainlink-style setup would aggregate several independent nodes before
+-- posting anything.
 module Ozmium.Oracle where
 
 data CorroborationStatus
@@ -24,12 +20,9 @@ data CorroborationStatus
   | Mismatch
   deriving (Eq, Show)
 
--- | A publicly-sourced reference value (e.g. a bond's published coupon
--- rate) that can confirm or flag a mismatch against an attestor's claim,
--- without altering or gating the core attestation/validation/entitlement/
--- settlement flow in any way. This is a corroboration signal, not a
--- second required approval — the core flow does not check for or wait on
--- an OracleCorroboration contract to exist.
+-- | Checks a publicly known rate against what the attestor claimed.
+-- This is a signal, not a gate — nothing in the core flow waits on or
+-- checks for one of these existing.
 template OracleCorroboration
   with
     oracle        : Party

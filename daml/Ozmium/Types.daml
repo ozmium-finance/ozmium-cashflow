@@ -1,15 +1,11 @@
--- | Shared data types for the Ozmium cashflow contract pattern.
---
--- Kept asset-class agnostic on purpose: the same RevenueType/Deduction/
--- EntitlementLine shapes are meant to serve real estate rent today and
--- bonds/private-credit coupon and loan-repayment events in phase two,
--- per the Mission Brief's use-case sequencing.
+-- | Shared types for the cashflow pattern. Kept generic on purpose —
+-- real estate rent is the first use case but bonds/private credit
+-- (coupons, loan repayments) are supposed to reuse this same shape in
+-- phase two, so nothing here should be real-estate-specific.
 module Ozmium.Types where
 
--- | The kind of economic event being attested. `Other` is an escape hatch
--- for asset classes not yet modeled explicitly (funds/PE distributions,
--- infrastructure revenue, etc. — see the Revenue Attestation Architecture
--- doc's asset-class breakdown).
+-- | What kind of event we're attesting to. `Other` is just an escape
+-- hatch for stuff we haven't modeled yet (fund distributions, etc).
 data RevenueType
   = Rent
   | Coupon
@@ -18,20 +14,18 @@ data RevenueType
   | Other
   deriving (Eq, Show)
 
--- | A single itemized deduction against gross revenue (management fee,
--- servicing fee, etc.). Deductions are kept itemized rather than netted
--- upstream so the programmable waterfall logic stays visible on-ledger —
--- see "Deductions itemized, not netted upstream" in the Revenue
--- Attestation Architecture doc.
+-- | One deduction against the gross amount (management fee, servicing
+-- fee...). We keep these itemized instead of taking a pre-netted number
+-- from the servicer — otherwise the waterfall math happens off-ledger
+-- and we lose the whole point of doing this on Canton.
 data Deduction = Deduction
   with
     deductionType : Text
     amount        : Decimal
   deriving (Eq, Show)
 
--- | One line of a computed entitlement: how much of the net distributable
--- amount a given token holder is owed, and the ownership share used to
--- compute it.
+-- | One line of a calculated entitlement — a holder, their share, and
+-- what that share works out to in money.
 data EntitlementLine = EntitlementLine
   with
     holder : Party
@@ -39,7 +33,7 @@ data EntitlementLine = EntitlementLine
     amount : Decimal
   deriving (Eq, Show)
 
--- | Sum of a list of Decimals. Small helper so calculation modules don't
--- each need to reimplement it.
+-- | Just a small convenience wrapper so we're not writing `foldl (+) 0.0`
+-- in three different modules.
 sumDecimals : [Decimal] -> Decimal
 sumDecimals = foldl (+) 0.0

@@ -1,27 +1,24 @@
--- | Demo party allocation + seed data. Run explicitly against a running
--- `dpm sandbox` with:
+-- | Allocates demo parties and seeds a bit of starting data. Doesn't
+-- run automatically — fire it against a live sandbox yourself:
 --   dpm script --dar .daml/dist/ozmium-cashflow-0.1.0.dar \
 --     --script-name Ozmium.Setup:setup \
 --     --ledger-host localhost --ledger-port 6865
--- (There's no daml.yaml `init-script:` auto-run here -- that was a Daml
--- 2.x `daml start` convenience; dpm's sandbox/script split needs it run
--- as a separate step. See README.md for the full local-dev walkthrough.)
+-- (Old Daml 2.x `daml start` used to run an init-script for you
+-- automatically. dpm's sandbox/script split doesn't do that, so this is
+-- a manual step now. Full walkthrough is in the root README.)
 --
--- Also used as the shared party-setup helper for the test scenarios in
--- tests/scenarios/, so party names stay consistent between the
--- interactive demo and the automated tests.
+-- Also doubles as the shared party setup for the tests in
+-- tests/scenarios/, so the same party names show up whether you're
+-- running the demo or the test suite.
 --
--- Reference scenario throughout: a Berlin residential property owned by
--- an SPV ("BerlinSPV"), rent collected and reported monthly by its
--- property manager ("PropManagerCo"), fractionally owned by three
--- investors.
+-- The scenario throughout: a Berlin residential building owned by an
+-- SPV ("BerlinSPV"), rent reported monthly by its property manager
+-- ("PropManagerCo"), three investors holding fractional shares.
 --
--- Without contract keys (Canton 3.x doesn't support them), the
--- AttestorRegistry and HoldingsSnapshot ContractIds created here have to
--- be tracked by whoever calls this and passed explicitly into later
--- commands (e.g. Attestation_Validate's registryCid, or
--- ValidatedRevenueEvent_CalculateEntitlement's holdingsCid) -- setup
--- prints them via `debug` so they're visible in script output/logs.
+-- Since there's no contract keys to look things up by, `setup` prints
+-- the AttestorRegistry and HoldingsSnapshot ids via `debug` — grab those
+-- from the script output and pass them into whatever you run next
+-- (Attestation_Validate's registryCid, etc).
 module Ozmium.Setup where
 
 import Daml.Script
@@ -51,8 +48,7 @@ setup : Script ()
 setup = do
   DemoParties{..} <- allocateDemoParties
 
-  -- Register PropManagerCo as the authorized attestor for property
-  -- "berlin-hauptstrasse-12".
+  -- PropManagerCo is the authorized attestor for berlin-hauptstrasse-12.
   registryCid <- submit admin do
     createCmd AttestorRegistry with
       admin
@@ -60,7 +56,7 @@ setup = do
       assetId = "berlin-hauptstrasse-12"
       authorizedAttestor = propManager
 
-  -- Seed a holdings snapshot: 50% / 30% / 20% pro-rata split.
+  -- 50/30/20 split across the three investors.
   holdingsCid <- submit berlinSpv do
     createCmd HoldingsSnapshot with
       fund = berlinSpv
@@ -71,8 +67,7 @@ setup = do
         , (investor3, 0.20)
         ]
 
-  -- No contract keys to look these up by later -- print them so whoever
-  -- ran this script can copy them into the mock attestor / demo commands.
+  -- Print these since there's no way to look them up by key anymore.
   debug ("AttestorRegistry contract id: " <> show registryCid)
   debug ("HoldingsSnapshot contract id: " <> show holdingsCid)
   pure ()

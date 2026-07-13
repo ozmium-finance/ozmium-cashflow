@@ -1,23 +1,19 @@
 #!/usr/bin/env python3
 """
-Mock attestor — simulates a property manager's system submitting a signed
-revenue event to Ozmium's Canton participant, so the demo doesn't rely on
-manually running `daml script` commands live (Checkpoint 5, Dev Build
-Guide).
+Stands in for a property manager's system sending a signed revenue event
+over to Ozmium, so we don't have to run daml script commands live during
+a demo.
 
-Reads a JSON payload shaped like the attestation schema drafted in the
-Revenue Attestation Architecture doc (asset_id, period_start/end,
-revenue_type, gross_amount, currency, deductions, source_reference) and
-POSTs it to the Daml JSON API as a `create` command for
-Ozmium.Attestation:RevenueAttestation.
+Takes a JSON payload shaped like the schema in the Revenue Attestation
+Architecture doc (asset_id, period_start/end, revenue_type, gross_amount,
+currency, deductions, source_reference) and POSTs it to the Daml JSON API
+as a create command for Ozmium.Attestation:RevenueAttestation.
 
-One deliberate difference from the draft schema: there is no
-`attestor_signature` field here. On Canton/Daml the ledger itself will
-only let this create command succeed if it is submitted with the
-attestor party's own authority (see `signatory attestor` in
-Attestation.daml) — the JWT used to call the JSON API *is* the signature.
-A separate signature field would be redundant with what the ledger
-already enforces structurally.
+One thing you'll notice is missing versus that draft schema: no
+attestor_signature field. Don't need one — Canton already won't let this
+create succeed unless it's submitted with the attestor's own authority
+(see `signatory attestor` in Attestation.daml), so the JWT itself is
+doing that job. A separate signature field would just be redundant.
 
 Usage:
     python3 submit_attestation.py attestation_sample.json \\
@@ -25,10 +21,9 @@ Usage:
         --json-api-url http://localhost:7575 \\
         --jwt-file ./propmanager.jwt
 
-Requires the Daml JSON API to be running against a sandbox or Canton
-participant (`dpm sandbox --json-api-port 7575`) and a JWT authorizing
-the attestor party to act. See the project README for how to obtain a
-sandbox JWT for local testing.
+Needs the Daml JSON API running against a sandbox or participant
+(`dpm sandbox --json-api-port 7575`) and a JWT that lets you act as the
+attestor. See the project README for how to get a sandbox JWT locally.
 """
 
 import argparse
@@ -40,8 +35,7 @@ import requests
 
 TEMPLATE_ID = "Ozmium.Attestation:RevenueAttestation"
 
-# Maps the mock attestor's lowercase revenue_type strings onto the
-# RevenueType constructors defined in Ozmium.Types.
+# lowercase strings in the JSON -> the RevenueType constructors in Daml
 REVENUE_TYPE_MAP = {
     "rent": "Rent",
     "coupon": "Coupon",
@@ -51,8 +45,8 @@ REVENUE_TYPE_MAP = {
 
 
 def to_daml_variant(tag: str) -> dict:
-    """Nullary Daml variant constructors encode as {"tag": ..., "value": {}}
-    in the JSON API."""
+    """The JSON API wants nullary variant constructors as
+    {"tag": ..., "value": {}} — not just the bare string."""
     return {"tag": tag, "value": {}}
 
 

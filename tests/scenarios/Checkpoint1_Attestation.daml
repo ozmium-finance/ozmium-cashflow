@@ -1,7 +1,6 @@
--- | Checkpoint 1 — Attestation.
+-- | Checkpoint 1 — attestation.
 --
--- Done when: a Daml Script scenario shows the attestor creating an
--- attestation contract, and an unauthorized party cannot create one.
+-- Done when: the attestor can create an attestation, and nobody else can.
 module Checkpoint1_Attestation where
 
 import DA.Assert
@@ -11,8 +10,7 @@ import Ozmium.Attestation
 import Ozmium.Types
 import Ozmium.Setup
 
--- The defined attestor party (PropManagerCo) can submit an economic
--- event: rent collected for berlin-hauptstrasse-12, period July 2026.
+-- PropManagerCo attests to July rent for berlin-hauptstrasse-12.
 test_attestorCanCreateAttestation : Script ()
 test_attestorCanCreateAttestation = script do
   DemoParties{..} <- allocateDemoParties
@@ -33,16 +31,17 @@ test_attestorCanCreateAttestation = script do
         ]
       sourceRef = "statement-2026-07-berlin-hauptstrasse-12"
 
-  -- The attestation exists and is visible to both attestor and fund.
+  -- both attestor and fund should be able to see it
   Some attestation <- queryContractId propManager attestationCid
   attestation.grossAmount === 12500.00
 
   Some _ <- queryContractId berlinSpv attestationCid
   pure ()
 
--- An unauthorized party (not the attestor) cannot create an attestation
--- claiming to be from PropManagerCo — the ledger rejects it for lack of
--- authority before any application logic even runs.
+-- Someone who isn't PropManagerCo tries to submit an attestation
+-- claiming to be them. Should fail outright — the ledger won't even
+-- let the command through, since impostor has no authority to act as
+-- attestor.
 test_unauthorizedPartyCannotCreateAttestation : Script ()
 test_unauthorizedPartyCannotCreateAttestation = script do
   DemoParties{..} <- allocateDemoParties
@@ -61,9 +60,8 @@ test_unauthorizedPartyCannotCreateAttestation = script do
       deductions = []
       sourceRef = "forged-statement"
 
--- A malformed attestation (non-positive gross amount, or an inverted
--- period) is rejected by the template's `ensure` clause even when
--- submitted by the legitimate attestor.
+-- Bad data (zero/negative amount, or period end before period start)
+-- gets caught by `ensure`, even from the real attestor.
 test_malformedAttestationRejected : Script ()
 test_malformedAttestationRejected = script do
   DemoParties{..} <- allocateDemoParties

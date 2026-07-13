@@ -1,7 +1,6 @@
--- | Checkpoint 3 — Entitlement calculation.
+-- | Checkpoint 3 — entitlement calculation.
 --
--- Done when: a scenario with 2-3 token holders produces correct,
--- itemized entitlement amounts.
+-- Done when: 2-3 token holders get correct, itemized amounts.
 module Checkpoint3_Entitlement where
 
 import DA.Assert
@@ -59,8 +58,8 @@ test_entitlementSplitsProRataAcrossThreeHolders = script do
     , EntitlementLine with holder = investor3, share = 0.20, amount = 2400.00
     ]
 
--- Two-holder case, exercising a different split (60/40) to make sure the
--- calculation isn't accidentally hardcoded to three parties.
+-- Same thing but two holders and a different split (60/40), just to
+-- make sure nothing's hardcoded to three parties.
 test_entitlementSplitsAcrossTwoHolders : Script ()
 test_entitlementSplitsAcrossTwoHolders = script do
   DemoParties{..} <- allocateDemoParties
@@ -103,9 +102,8 @@ test_entitlementSplitsAcrossTwoHolders = script do
     , EntitlementLine with holder = investor2, share = 0.40, amount = 4000.00
     ]
 
--- A holdings snapshot whose shares don't sum to 1.0 is rejected by the
--- template's `ensure` clause — guards against silently mis-splitting
--- money due to a bad data feed.
+-- Shares that don't add up to 1.0 get rejected outright — better than
+-- silently mis-splitting money because someone's holdings feed was off.
 test_holdingsSnapshotMustSumToOne : Script ()
 test_holdingsSnapshotMustSumToOne = script do
   DemoParties{..} <- allocateDemoParties

@@ -1,15 +1,15 @@
--- | Checkpoint 2 — Validation.
+-- | Checkpoint 2 — validation.
 --
--- Done when: a scenario shows a valid attestation passing and an invalid
--- one (wrong party, duplicate period) being rejected.
+-- Done when: a valid attestation passes, and a bad one (wrong party,
+-- duplicate period) gets rejected.
 --
--- Duplicate-period rejection is now a defense-in-depth, opt-in check
--- (knownPriorEventCids) rather than an unconditional ledger guarantee,
--- because Canton 3.x doesn't support contract keys. See the note on
--- Attestation_Validate in Attestation.daml. Both the caught and
--- not-caught-without-the-check cases are tested below, deliberately, so
--- the boundary of what's actually enforced on-ledger is explicit rather
--- than assumed.
+-- Quick note on the duplicate-period case: it's opt-in now
+-- (knownPriorEventCids), not something the ledger guarantees on its own,
+-- because Canton 3.x dropped contract keys. See the comment on
+-- Attestation_Validate in Attestation.daml for the full story. Below we
+-- test both sides of that on purpose — the case where it catches a
+-- duplicate, and the case where it doesn't — so nobody mistakes the gap
+-- for a bug later.
 module Checkpoint2_Validation where
 
 import DA.Assert
@@ -43,8 +43,8 @@ mkAttestationCmd attestor fund assetId periodStart periodEnd grossAmount sourceR
     deductions = [Deduction with deductionType = "management_fee", amount = 625.00]
     sourceRef
 
--- A valid attestation, from the registered attestor, passes validation
--- and produces a ValidatedRevenueEvent with the expected net amount.
+-- Attestation from the registered attestor validates fine, net amount
+-- comes out right.
 test_validAttestationPasses : Script ()
 test_validAttestationPasses = script do
   parties@DemoParties{..} <- allocateDemoParties
@@ -60,9 +60,9 @@ test_validAttestationPasses = script do
   Some validated <- queryContractId berlinSpv validatedCid
   validated.netDistributable === 11875.00  -- 12500 - 625
 
--- An attestation from a party who is NOT the registered attestor for
--- this asset is rejected at validation, even though the attestation
--- contract itself was created validly (by that party, about themselves).
+-- Someone who's not the registered attestor can still create an
+-- attestation about themselves (nothing stops that), but it gets
+-- rejected the moment we try to validate it against the registry.
 test_wrongPartyRejected : Script ()
 test_wrongPartyRejected = script do
   parties@DemoParties{..} <- allocateDemoParties
@@ -76,14 +76,10 @@ test_wrongPartyRejected = script do
   submitMustFail berlinSpv do
     exerciseCmd rogueAttestationCid Attestation_Validate with registryCid, knownPriorEventCids = []
 
--- Once a period has been validated, a second attestation for the same
--- fund/asset/period is rejected at validation time -- *provided* the
--- caller passes the already-known ValidatedRevenueEvent ContractId into
--- knownPriorEventCids (the on-ledger defense-in-depth check; see the note
--- on Attestation_Validate in Attestation.daml). Canton 3.x has no
--- contract keys, so this is no longer enforced by the ledger on its own —
--- the fund's off-ledger automation is expected to have queried for and
--- supplied any known prior events before submitting.
+-- A second attestation for a period that's already been validated gets
+-- caught — as long as we pass the earlier ValidatedRevenueEvent id into
+-- knownPriorEventCids. In practice that's the fund's automation having
+-- already looked it up before submitting.
 test_duplicatePeriodRejected : Script ()
 test_duplicatePeriodRejected = script do
   parties@DemoParties{..} <- allocateDemoParties
@@ -96,23 +92,22 @@ test_duplicatePeriodRejected = script do
   validatedCid <- submit berlinSpv do
     exerciseCmd firstAttestationCid Attestation_Validate with registryCid, knownPriorEventCids = []
 
-  -- A corrected/resubmitted attestation for the *same period*.
+  -- a corrected resubmission for the same period
   secondAttestationCid <- submit propManager do
     createCmd (mkAttestationCmd propManager berlinSpv "berlin-hauptstrasse-12"
       (date 2026 Jul 1) (date 2026 Jul 31) 13000.00 "statement-2026-07-corrected")
 
-  -- The fund's automation looked this up and found the first
-  -- ValidatedRevenueEvent already covers this period -- passing it in
-  -- causes the choice to hard-fail rather than double-validate.
+  -- we already know about the first ValidatedRevenueEvent, so pass it in
+  -- and this should hard-fail instead of double-validating
   submitMustFail berlinSpv do
     exerciseCmd secondAttestationCid Attestation_Validate with
       registryCid, knownPriorEventCids = [validatedCid]
 
--- If the caller doesn't know about (or doesn't pass) a prior event, the
--- ledger itself can no longer catch the duplicate -- this is the
--- off-ledger responsibility made explicit rather than silently assumed.
--- Documenting this behavior explicitly, rather than only the
--- defense-in-depth path, so it isn't mistaken for a bug later.
+-- And here's the flip side: if nobody passes in the prior event, the
+-- ledger has no way to catch this on its own anymore. Second
+-- ValidatedRevenueEvent for the same period just... gets created. This
+-- is the off-ledger responsibility mentioned above, made visible instead
+-- of hidden.
 test_duplicatePeriodNotCaughtWithoutKnownPriorEvents : Script ()
 test_duplicatePeriodNotCaughtWithoutKnownPriorEvents = script do
   parties@DemoParties{..} <- allocateDemoParties
@@ -128,9 +123,8 @@ test_duplicatePeriodNotCaughtWithoutKnownPriorEvents = script do
     createCmd (mkAttestationCmd propManager berlinSpv "berlin-hauptstrasse-12"
       (date 2026 Jul 1) (date 2026 Jul 31) 13000.00 "statement-2026-07-corrected")
 
-  -- Passing [] here succeeds and produces a second ValidatedRevenueEvent
-  -- for the same period -- this is the gap that the fund's off-ledger
-  -- query is responsible for closing before submission in practice.
+  -- [] here means "nothing to check against" -- this succeeds and
+  -- quietly produces a second ValidatedRevenueEvent for the same period
   _secondValidatedCid <- submit berlinSpv do
     exerciseCmd secondAttestationCid Attestation_Validate with registryCid, knownPriorEventCids = []
   pure ()
