@@ -4,7 +4,7 @@
 #
 # Build the repo root first, then this one (`dpm build --all` from the
 # root does both, see multi-package.yaml).
-sdk-version: 3.5.3
+sdk-version: 3.5.2
 name: ozmium-mock-attestor
 source: .
 version: 0.1.0

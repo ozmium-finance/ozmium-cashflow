@@ -36,12 +36,12 @@ data DemoParties = DemoParties
 
 allocateDemoParties : Script DemoParties
 allocateDemoParties = do
-  admin       <- allocatePartyWithHint "Admin" (PartyIdHint "Admin")
-  propManager <- allocatePartyWithHint "PropManagerCo" (PartyIdHint "PropManagerCo")
-  berlinSpv   <- allocatePartyWithHint "BerlinSPV" (PartyIdHint "BerlinSPV")
-  investor1   <- allocatePartyWithHint "InvestorAlice" (PartyIdHint "InvestorAlice")
-  investor2   <- allocatePartyWithHint "InvestorBob" (PartyIdHint "InvestorBob")
-  investor3   <- allocatePartyWithHint "InvestorCarol" (PartyIdHint "InvestorCarol")
+  admin       <- allocatePartyByHint (PartyIdHint "Admin")
+  propManager <- allocatePartyByHint (PartyIdHint "PropManagerCo")
+  berlinSpv   <- allocatePartyByHint (PartyIdHint "BerlinSPV")
+  investor1   <- allocatePartyByHint (PartyIdHint "InvestorAlice")
+  investor2   <- allocatePartyByHint (PartyIdHint "InvestorBob")
+  investor3   <- allocatePartyByHint (PartyIdHint "InvestorCarol")
   pure DemoParties with admin, propManager, berlinSpv, investor1, investor2, investor3
 
 setup : Script ()

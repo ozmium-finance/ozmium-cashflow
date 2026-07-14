@@ -18,20 +18,26 @@
 module MockAttestor where
 
 import DA.Date
-import DA.List (find)
+import DA.Text (isInfixOf)
 import Daml.Script
 import Ozmium.Attestation
 import Ozmium.Types
 
--- | Finds a party by display name if Ozmium.Setup:setup already ran on
--- this ledger, otherwise just allocates one. Lets this script work
--- either way without caring which.
+-- | Finds a party by matching the hint against the party's own
+-- identifier text, if Ozmium.Setup:setup already ran on this ledger,
+-- otherwise just allocates one. Lets this script work either way
+-- without caring which.
+--
+-- Used to do this by display name, but PartyDetails doesn't carry one
+-- in this SDK anymore -- allocatePartyByHint bakes the hint straight
+-- into the party identifier instead, so matching against that is the
+-- equivalent now.
 getOrAllocateParty : Text -> Script Party
 getOrAllocateParty hint = do
   known <- listKnownParties
-  case find (\p -> p.displayName == Some hint) known of
+  case find (\p -> hint `isInfixOf` partyToText p.party) known of
     Some p -> pure p.party
-    None -> allocatePartyWithHint hint (PartyIdHint hint)
+    None -> allocatePartyByHint (PartyIdHint hint)
 
 -- | Same numbers as attestation_sample.json, just hardcoded here instead
 -- of read from a file.

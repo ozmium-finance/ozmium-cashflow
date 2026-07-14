@@ -17,8 +17,8 @@ import Ozmium.Oracle
 
 test_oracleConfirmsMatchingRate : Script ()
 test_oracleConfirmsMatchingRate = script do
-  chainlinkOracle <- allocatePartyWithHint "ChainlinkOracle" (PartyIdHint "ChainlinkOracle")
-  bondFund <- allocatePartyWithHint "BondFundSPV" (PartyIdHint "BondFundSPV")
+  chainlinkOracle <- allocatePartyByHint (PartyIdHint "ChainlinkOracle")
+  bondFund <- allocatePartyByHint (PartyIdHint "BondFundSPV")
 
   corroborationCid <- submit chainlinkOracle do
     createCmd OracleCorroboration with
@@ -38,8 +38,8 @@ test_oracleConfirmsMatchingRate = script do
 
 test_oracleFlagsMismatch : Script ()
 test_oracleFlagsMismatch = script do
-  chainlinkOracle <- allocatePartyWithHint "ChainlinkOracle" (PartyIdHint "ChainlinkOracle")
-  bondFund <- allocatePartyWithHint "BondFundSPV" (PartyIdHint "BondFundSPV")
+  chainlinkOracle <- allocatePartyByHint (PartyIdHint "ChainlinkOracle")
+  bondFund <- allocatePartyByHint (PartyIdHint "BondFundSPV")
 
   corroborationCid <- submit chainlinkOracle do
     createCmd OracleCorroboration with

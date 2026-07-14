@@ -7,7 +7,7 @@ module Checkpoint4_Settlement where
 
 import DA.Assert
 import DA.Date
-import DA.Action (forA, forA_)
+import DA.Foldable (forA_)
 import DA.List (sortOn)
 import Daml.Script
 import Ozmium.Attestation
@@ -92,7 +92,7 @@ test_fullLifecycleEndToEnd = script do
 
   -- and the fund can mark one paid once the actual transfer clears
   -- (e.g. a Hedera stablecoin transfer confirming on the other side)
-  let (firstSettlementCid : _) = settlementCids
+  let (firstSettlementCid :: _) = settlementCids
   paidCid <- submit berlinSpv do
     exerciseCmd firstSettlementCid Settlement_MarkPaid
   Some paidSettlement <- queryContractId berlinSpv paidCid

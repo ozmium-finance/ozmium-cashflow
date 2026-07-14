@@ -11,7 +11,7 @@
 # version in the root daml.yaml and you'll need to update that filename
 # too. (Or just run `dpm build --all` from the repo root and skip doing
 # this by hand — see multi-package.yaml.)
-sdk-version: 3.5.3
+sdk-version: 3.5.2
 name: ozmium-cashflow-tests
 source: .
 version: 0.1.0

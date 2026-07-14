@@ -9,7 +9,7 @@
 # sdk-version below was the latest stable as of writing (June 2026) —
 # double check with `dpm sdk list` since I couldn't hit
 # get.digitalasset.com from here to confirm it.
-sdk-version: 3.5.3
+sdk-version: 3.5.2
 name: ozmium-cashflow
 source: daml
 version: 0.1.0

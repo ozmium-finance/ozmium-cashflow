@@ -67,7 +67,7 @@ test_wrongPartyRejected : Script ()
 test_wrongPartyRejected = script do
   parties@DemoParties{..} <- allocateDemoParties
   registryCid <- setupRegistry parties
-  rogueManager <- allocatePartyWithHint "RogueManager" (PartyIdHint "RogueManager")
+  rogueManager <- allocatePartyByHint (PartyIdHint "RogueManager")
 
   rogueAttestationCid <- submit rogueManager do
     createCmd (mkAttestationCmd rogueManager berlinSpv "berlin-hauptstrasse-12"

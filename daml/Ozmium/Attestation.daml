@@ -23,7 +23,7 @@
 -- Attestation_Validate below for what replaced it.
 module Ozmium.Attestation where
 
-import DA.Action (forA_)
+import DA.Foldable (forA_)
 import DA.Assert
 import Ozmium.Types
 import Ozmium.Validation

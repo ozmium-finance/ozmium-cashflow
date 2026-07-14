@@ -45,7 +45,7 @@ test_attestorCanCreateAttestation = script do
 test_unauthorizedPartyCannotCreateAttestation : Script ()
 test_unauthorizedPartyCannotCreateAttestation = script do
   DemoParties{..} <- allocateDemoParties
-  impostor <- allocatePartyWithHint "Impostor" (PartyIdHint "Impostor")
+  impostor <- allocatePartyByHint (PartyIdHint "Impostor")
 
   submitMustFail impostor do
     createCmd RevenueAttestation with
