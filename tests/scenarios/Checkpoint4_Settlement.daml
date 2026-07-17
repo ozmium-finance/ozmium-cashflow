@@ -12,6 +12,7 @@ import DA.List (sortOn)
 import Daml.Script
 import Ozmium.Attestation
 import Ozmium.Validation
+import Ozmium.Distribution
 import Ozmium.Entitlement
 import Ozmium.Settlement
 import Ozmium.Types
@@ -60,11 +61,22 @@ test_fullLifecycleEndToEnd = script do
     exerciseCmd attestationCid Attestation_Validate with registryCid, knownPriorEventCids = []
 
   Some validated <- queryContractId berlinSpv validatedCid
-  validated.netDistributable === 11875.00  -- 12500 - 500 - 125
+  validated.netDistributable === 11875.00  -- 12500 - 500 - 125, property-level NOI
 
-  -- checkpoint 3: entitlement calculation
+  -- checkpoint 3: distribution decision -- BerlinSPV retains a debt-
+  -- service reserve before anything reaches token holders, instead of
+  -- passing through 100% of NOI by default
+  distributionCid <- submit berlinSpv do
+    exerciseCmd validatedCid ValidatedRevenueEvent_DecideDistribution with
+      retentionAmount = 1875.00
+      retentionReason = "debt-service reserve"
+
+  Some distribution <- queryContractId berlinSpv distributionCid
+  distribution.passThroughAmount === 10000.00  -- 11875 - 1875
+
+  -- checkpoint 3b: entitlement calculation, off the pass-through amount
   entitlementCid <- submit berlinSpv do
-    exerciseCmd validatedCid ValidatedRevenueEvent_CalculateEntitlement with holdingsCid
+    exerciseCmd distributionCid DistributionDecision_CalculateEntitlement with holdingsCid
 
   Some entitlement <- queryContractId berlinSpv entitlementCid
   entitlement.sourceRef === sourceRef
@@ -79,9 +91,11 @@ test_fullLifecycleEndToEnd = script do
 
   -- this is the auditability check that matters: every settlement
   -- carries the source_reference back to the attestation that caused
-  -- it, and the total settled matches the validated event's net amount
-  -- exactly. someone auditing this later shouldn't need anything but
-  -- the ledger to walk a payout back to its source event.
+  -- it, and the total settled matches the pass-through amount exactly
+  -- -- not the raw NOI, since EUR 1,875 of that never left BerlinSPV.
+  -- someone auditing this later shouldn't need anything but the ledger
+  -- to walk a payout back to its source event and see why the numbers
+  -- are what they are.
   forA_ paidOut $ \s -> s.sourceEventRef === sourceRef
   let totalSettled = sum [s.amount | s <- paidOut]
   totalSettled === entitlement.netDistributable

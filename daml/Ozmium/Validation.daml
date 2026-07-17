@@ -15,7 +15,7 @@
 module Ozmium.Validation where
 
 import Ozmium.Types
-import Ozmium.Entitlement
+import Ozmium.Distribution
 
 -- | Says who's allowed to attest for a given asset. One admin party
 -- controls it for now — fine for a demo, but this is really the trust
@@ -62,27 +62,22 @@ template ValidatedRevenueEvent
 
     ensure netDistributable > 0.0
 
-    -- Checkpoint 3 from here: work out entitlements against a holdings
-    -- snapshot. `fund` controls it since it's ultimately their
-    -- obligation; attestor's signature just comes along from the
-    -- contract we're consuming, which happens to line up exactly with
-    -- what EntitlementCalculation needs anyway.
-    choice ValidatedRevenueEvent_CalculateEntitlement : ContractId EntitlementCalculation
+    -- This used to go straight to entitlement calculation from here.
+    -- It doesn't anymore -- a design review pointed out that collapses
+    -- two real settlement layers into one: property-level netting
+    -- (this contract, deductions already applied) and the SPV's
+    -- separate decision about how much of that net income actually
+    -- gets passed through versus retained (reserve, debt service,
+    -- whatever). See Distribution.daml for that step. `fund` controls
+    -- it since it's their call to make; attestor's signature comes
+    -- along from the contract being consumed, same as before.
+    choice ValidatedRevenueEvent_DecideDistribution : ContractId DistributionDecision
       with
-        holdingsCid : ContractId HoldingsSnapshot
+        retentionAmount : Decimal
+        retentionReason : Text
       controller fund
       do
-        holdingsSnapshot <- fetch holdingsCid
-        assertMsg
-          ("Holdings snapshot is for asset " <> holdingsSnapshot.assetId <> ", not " <> assetId)
-          (holdingsSnapshot.assetId == assetId)
-        assertMsg
-          "Holdings snapshot belongs to a different fund"
-          (holdingsSnapshot.fund == fund)
-
-        let lines = calculateEntitlementLines netDistributable holdingsSnapshot.holdings
-
-        create EntitlementCalculation with
+        create DistributionDecision with
           fund
           attestor
           assetId
@@ -90,6 +85,8 @@ template ValidatedRevenueEvent
           periodStart
           periodEnd
           currency
-          netDistributable
-          lines
+          netOperatingIncome = netDistributable
+          retentionAmount
+          retentionReason
+          passThroughAmount = netDistributable - retentionAmount
           sourceRef

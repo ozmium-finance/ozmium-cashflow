@@ -1,0 +1,156 @@
+-- | Checkpoint 3b -- the SPV's retention/pass-through decision, sitting
+-- between validation and entitlement calculation. Added after a design
+-- review pointed out the original build compressed two real settlement
+-- layers (property-level netting, then ownership-level distribution)
+-- into one hop, as if BerlinSPV always passed through 100% of net
+-- operating income. See Distribution.daml for the reasoning.
+--
+-- Done when: a retained amount actually reduces what reaches token
+-- holders, and the ledger won't let a fund retain more than the net
+-- operating income it's deciding against.
+module Checkpoint3b_Distribution where
+
+import DA.Assert
+import DA.Date
+import Daml.Script
+import Ozmium.Attestation
+import Ozmium.Validation
+import Ozmium.Distribution
+import Ozmium.Entitlement
+import Ozmium.Types
+import Ozmium.Setup
+
+-- BerlinSPV holds back a debt-service reserve before distributing the
+-- rest -- the case that was previously impossible to express at all.
+test_spvRetainsReserveBeforeDistribution : Script ()
+test_spvRetainsReserveBeforeDistribution = script do
+  DemoParties{..} <- allocateDemoParties
+
+  registryCid <- submit admin do
+    createCmd AttestorRegistry with
+      admin
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      authorizedAttestor = propManager
+
+  holdingsCid <- submit berlinSpv do
+    createCmd HoldingsSnapshot with
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      holdings = [(investor1, 0.50), (investor2, 0.30), (investor3, 0.20)]
+
+  attestationCid <- submit propManager do
+    createCmd RevenueAttestation with
+      attestor = propManager
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      revenueType = Rent
+      periodStart = date 2026 Jul 1
+      periodEnd = date 2026 Jul 31
+      grossAmount = 12500.00
+      currency = "EUR"
+      deductions =
+        [ Deduction with deductionType = "management_fee", amount = 500.00
+        , Deduction with deductionType = "servicing_fee", amount = 125.00
+        ]
+      sourceRef = "statement-2026-07"
+
+  validatedCid <- submit berlinSpv do
+    exerciseCmd attestationCid Attestation_Validate with registryCid, knownPriorEventCids = []
+
+  Some validated <- queryContractId berlinSpv validatedCid
+  validated.netDistributable === 11875.00  -- property-level NOI, unchanged from before
+
+  -- BerlinSPV retains EUR 1,875 as a debt-service reserve, passes the
+  -- rest through
+  distributionCid <- submit berlinSpv do
+    exerciseCmd validatedCid ValidatedRevenueEvent_DecideDistribution with
+      retentionAmount = 1875.00
+      retentionReason = "debt-service reserve"
+
+  Some distribution <- queryContractId berlinSpv distributionCid
+  distribution.netOperatingIncome === 11875.00
+  distribution.passThroughAmount === 10000.00
+
+  entitlementCid <- submit berlinSpv do
+    exerciseCmd distributionCid DistributionDecision_CalculateEntitlement with holdingsCid
+
+  Some entitlement <- queryContractId berlinSpv entitlementCid
+  -- the retained EUR 1,875 never reaches the pro-rata split -- only the
+  -- EUR 10,000 pass-through amount does
+  entitlement.netDistributable === 10000.00
+  entitlement.lines ===
+    [ EntitlementLine with holder = investor1, share = 0.50, amount = 5000.00
+    , EntitlementLine with holder = investor2, share = 0.30, amount = 3000.00
+    , EntitlementLine with holder = investor3, share = 0.20, amount = 2000.00
+    ]
+
+-- A fund can't retain more than the net operating income it's deciding
+-- against -- that would mean passing through a negative amount, which
+-- doesn't mean anything.
+test_retentionCannotExceedNetOperatingIncome : Script ()
+test_retentionCannotExceedNetOperatingIncome = script do
+  DemoParties{..} <- allocateDemoParties
+
+  registryCid <- submit admin do
+    createCmd AttestorRegistry with
+      admin
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      authorizedAttestor = propManager
+
+  attestationCid <- submit propManager do
+    createCmd RevenueAttestation with
+      attestor = propManager
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      revenueType = Rent
+      periodStart = date 2026 Jul 1
+      periodEnd = date 2026 Jul 31
+      grossAmount = 12500.00
+      currency = "EUR"
+      deductions = [Deduction with deductionType = "management_fee", amount = 625.00]
+      sourceRef = "statement-2026-07"
+
+  validatedCid <- submit berlinSpv do
+    exerciseCmd attestationCid Attestation_Validate with registryCid, knownPriorEventCids = []
+
+  -- NOI here is 11875.00 -- trying to retain more than that should fail
+  submitMustFail berlinSpv do
+    exerciseCmd validatedCid ValidatedRevenueEvent_DecideDistribution with
+      retentionAmount = 20000.00
+      retentionReason = "greedy"
+
+-- Negative retention doesn't mean anything either -- ensure catches it
+-- the same way.
+test_retentionCannotBeNegative : Script ()
+test_retentionCannotBeNegative = script do
+  DemoParties{..} <- allocateDemoParties
+
+  registryCid <- submit admin do
+    createCmd AttestorRegistry with
+      admin
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      authorizedAttestor = propManager
+
+  attestationCid <- submit propManager do
+    createCmd RevenueAttestation with
+      attestor = propManager
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      revenueType = Rent
+      periodStart = date 2026 Jul 1
+      periodEnd = date 2026 Jul 31
+      grossAmount = 12500.00
+      currency = "EUR"
+      deductions = [Deduction with deductionType = "management_fee", amount = 625.00]
+      sourceRef = "statement-2026-07"
+
+  validatedCid <- submit berlinSpv do
+    exerciseCmd attestationCid Attestation_Validate with registryCid, knownPriorEventCids = []
+
+  submitMustFail berlinSpv do
+    exerciseCmd validatedCid ValidatedRevenueEvent_DecideDistribution with
+      retentionAmount = -100.00
+      retentionReason = "doesn't mean anything"

@@ -1,0 +1,80 @@
+-- | Sits between Checkpoint 2 (validation) and Checkpoint 3 (entitlement)
+-- -- added after a design review flagged that the original build
+-- compressed two distinct real-world settlement layers into one hop.
+--
+-- Institutional real estate actually has two settlement layers, not
+-- one: tenants pay rent to the property manager, who nets out opex
+-- (management fees, servicing, reserves) and remits net operating
+-- income to the owning SPV -- that's what ValidatedRevenueEvent already
+-- represents. Then, separately, the SPV decides how much of that NOI
+-- actually gets passed through to shareholders/token holders, since
+-- institutional deals often retain a reserve or cover debt service
+-- first rather than passing through 100%.
+--
+-- DistributionDecision makes that second hop an explicit contract
+-- instead of an implicit assumption baked into the entitlement math. A
+-- 100%-pass-through fund still goes through this contract, just with
+-- retentionAmount = 0.0 -- that's a recorded policy choice on the
+-- ledger, not a shortcut the code takes for them.
+module Ozmium.Distribution where
+
+import Ozmium.Types
+import Ozmium.Entitlement
+
+-- | The SPV's retention/pass-through decision for one validated
+-- revenue event. attestor stays on as a signatory for the same reason
+-- it does on EntitlementCalculation and SettlementInstruction further
+-- down the chain -- so the link back to the original attestation is
+-- baked into who signed what, not something you'd have to go dig out
+-- of application logs.
+template DistributionDecision
+  with
+    fund               : Party
+    attestor           : Party
+    assetId            : Text
+    revenueType        : RevenueType
+    periodStart        : Date
+    periodEnd          : Date
+    currency           : Text
+    netOperatingIncome : Decimal  -- property-level NOI, i.e. ValidatedRevenueEvent.netDistributable
+    retentionAmount    : Decimal  -- reserve, debt service, whatever the SPV is holding back
+    retentionReason    : Text     -- free text; "" is fine for a straight pass-through
+    passThroughAmount  : Decimal  -- what actually reaches token holders
+    sourceRef          : Text
+  where
+    signatory fund, attestor
+
+    ensure retentionAmount >= 0.0
+      && retentionAmount <= netOperatingIncome
+      && passThroughAmount == netOperatingIncome - retentionAmount
+      && passThroughAmount > 0.0
+
+    -- Checkpoint 3 from here, same as before -- the only thing that's
+    -- changed is this now splits passThroughAmount instead of the raw
+    -- NOI, so a retained reserve never reaches the pro-rata split.
+    choice DistributionDecision_CalculateEntitlement : ContractId EntitlementCalculation
+      with
+        holdingsCid : ContractId HoldingsSnapshot
+      controller fund
+      do
+        holdingsSnapshot <- fetch holdingsCid
+        assertMsg
+          ("Holdings snapshot is for asset " <> holdingsSnapshot.assetId <> ", not " <> assetId)
+          (holdingsSnapshot.assetId == assetId)
+        assertMsg
+          "Holdings snapshot belongs to a different fund"
+          (holdingsSnapshot.fund == fund)
+
+        let lines = calculateEntitlementLines passThroughAmount holdingsSnapshot.holdings
+
+        create EntitlementCalculation with
+          fund
+          attestor
+          assetId
+          revenueType
+          periodStart
+          periodEnd
+          currency
+          netDistributable = passThroughAmount
+          lines
+          sourceRef

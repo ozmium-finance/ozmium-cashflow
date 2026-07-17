@@ -9,3 +9,7 @@ __pycache__/
 # Editor
 .vscode/
 *.swp
+
+# Local sandbox / Canton runtime
+log/
+*.log

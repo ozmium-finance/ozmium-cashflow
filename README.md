@@ -23,7 +23,8 @@ ozmium-cashflow/
 │   ├── Types.daml          # shared data types (RevenueType, Deduction, EntitlementLine)
 │   ├── Attestation.daml    # Checkpoint 1 — RevenueAttestation
 │   ├── Validation.daml     # Checkpoint 2 — AttestorRegistry, ValidatedRevenueEvent
-│   ├── Entitlement.daml    # Checkpoint 3 — HoldingsSnapshot, EntitlementCalculation
+│   ├── Distribution.daml   # Checkpoint 3 — DistributionDecision (SPV retention/pass-through)
+│   ├── Entitlement.daml    # Checkpoint 3b — HoldingsSnapshot, EntitlementCalculation
 │   ├── Settlement.daml     # Checkpoint 4 — SettlementInstruction
 │   ├── Oracle.daml         # STRETCH GOAL — oracle corroboration (separate, optional)
 │   └── Setup.daml          # demo party allocation + seed data (run via `dpm script`)
@@ -139,6 +140,12 @@ find them again later. From there, run the mock attestor against the
 sandbox; `integration/mock-attestor/README.md` covers both the Daml
 Script route and the JSON-API-over-HTTP one.
 
+For the full lifecycle narrated end to end in one go (what you'd
+actually use for a live demo or a recording), see `Ozmium.Demo:runFullDemo`
+and `demo/script.md` instead — it allocates its own parties and prints
+readable `debug` output at every step, so there's nothing to copy-paste
+between separate script runs.
+
 ## How to deploy (Canton test/Mission environment)
 
 1. Get the participant node URL and party allocation process sorted with
@@ -186,14 +193,36 @@ to bond coupon rates specifically, since that's a case where a published
 rate genuinely exists to check against — real estate rent doesn't have
 an equivalent.
 
+### Two settlement layers, not one
+
+This one came out of a design review partway through the build, and
+it's worth explaining because the first version got it wrong. Real
+institutional real estate has two distinct settlement layers: tenants
+pay rent to the property manager, who nets out opex and remits net
+operating income to the owning SPV (that's `ValidatedRevenueEvent`) —
+and then, separately, the SPV decides how much of that NOI actually
+gets passed through to token holders versus retained (a reserve, debt
+service, whatever). Institutional deals aren't always 100% pass-through.
+
+The original build compressed both into one hop — `netDistributable`
+flowed straight into the pro-rata split, as if BerlinSPV always
+distributed everything. That's an assumption that should be explicit,
+not implicit, so `DistributionDecision` (`Distribution.daml`) now sits
+between the two: `ValidatedRevenueEvent_DecideDistribution` records the
+SPV's retention amount and reason, and only the resulting
+`passThroughAmount` reaches entitlement calculation. A fund that passes
+through everything still goes through this contract, just with
+`retentionAmount = 0.0` — a recorded policy choice on the ledger,
+not a shortcut the code takes on their behalf.
+
 ### Why entitlement calculation is its own step
 
-`ValidatedRevenueEvent_CalculateEntitlement` takes a `HoldingsSnapshot`
-as a parameter instead of reading holdings straight off the validated
-event. That's the thing keeping this chain-agnostic — swap the
-manually-attested snapshot for a live CIP-56 or Hedera holdings read
-later, and nothing in Attestation/Validation/Settlement has to change.
-Only how the snapshot gets created is different.
+`DistributionDecision_CalculateEntitlement` takes a `HoldingsSnapshot`
+as a parameter instead of reading holdings straight off the
+distribution decision. That's the thing keeping this chain-agnostic —
+swap the manually-attested snapshot for a live CIP-56 or Hedera
+holdings read later, and nothing upstream has to change. Only how the
+snapshot gets created is different.
 
 ### Why deductions stay itemized
 
@@ -208,11 +237,13 @@ open question in the Revenue Attestation Architecture doc.
 
 ### Extending to bonds and private credit
 
-Nothing in `Types.daml`, `Validation.daml`, `Entitlement.daml`, or
-`Settlement.daml` assumes real estate specifically. `RevenueType`
-already has `Coupon` and `LoanRepayment` next to `Rent`. A bond coupon
-event goes through the exact same choices — attested, checked against a
-registered paying agent instead of a property manager, split across
+Nothing in `Types.daml`, `Validation.daml`, `Distribution.daml`,
+`Entitlement.daml`, or `Settlement.daml` assumes real estate
+specifically. `RevenueType` already has `Coupon` and `LoanRepayment`
+next to `Rent`. A bond coupon event goes through the exact same choices
+— attested, checked against a registered paying agent instead of a
+property manager, a retention decision made (a paying agent might
+retain nothing, or hold back a sinking-fund contribution), split across
 holders, settled — the only things that change are who the attestor is
 and what's in the registry. `Oracle.daml`'s bond corroboration check is
 already a working example of a phase-two extension living next to the
@@ -222,19 +253,26 @@ core pattern without touching it.
 
 Every `SettlementInstruction` carries `sourceEventRef`, which traces
 back to the attestation's original `source_reference`.
-`EntitlementCalculation` keeps `attestor` as a signatory alongside
-`fund`, so the whole chain — attestation, validation, entitlement,
-settlement — is baked into who signed what on the ledger, not something
-you'd have to go dig out of application logs.
+`EntitlementCalculation` and `DistributionDecision` both keep `attestor`
+as a signatory alongside `fund`, so the whole chain — attestation,
+validation, distribution decision, entitlement, settlement — is baked
+into who signed what on the ledger, not something you'd have to go dig
+out of application logs.
 `tests/scenarios/Checkpoint4_Settlement.daml` checks this directly: the
-settlement amounts sum to exactly the validated event's net
-distributable amount, and every settlement's source reference matches
-the original attestation.
+settlement amounts sum to exactly the distribution decision's
+pass-through amount (not the raw net operating income — a retained
+reserve is deliberately excluded), and every settlement's source
+reference matches the original attestation.
 
 ## Known limitations / what a next milestone would add
 
-- Waterfall is pro-rata only — no tranches, hurdle rates, or fee-on-fee
-  logic yet.
+- Retention is a single amount-and-reason field, not a real reserve
+  policy — no minimum reserve balance, no automatic debt-service
+  coverage ratio calculation, nothing tracking what happens to a
+  retained amount after it's retained. `DistributionDecision` just
+  records that the SPV made a call and what it was.
+- Entitlement calculation itself is pro-rata only — no tranches, hurdle
+  rates, or fee-on-fee logic yet.
 - `AttestorRegistry` is governed by one admin party. Since this is
   actually the trust root of the whole system, a real deployment
   probably wants multi-sig or a committee here, plus an actual legal
@@ -253,13 +291,11 @@ the original attestation.
   choice, and it's worth confirming with Ozmium what the actual PQS
   integration timeline looks like rather than treating the on-ledger
   check as good enough by itself.
-- Couldn't install DPM from where I'm working (no network access to
-  get.digitalasset.com, GitHub, npm, anything), so none of this has
-  actually been run through `dpm build`/`dpm test`. I went through the
-  Daml by hand looking for anything that wouldn't fly on 3.5 — including
-  a specific pass for leftover `key`/`maintainer`/`fetchByKey`/`lookupByKey`
-  — but that's not a substitute for actually compiling it. Run
-  `dpm build && dpm test` before you trust any of this. The
-  `sdk-version: 3.5.3` pin and the `dpm sandbox`/`dpm script` flags above
-  are looked-up, not tested — check them against `dpm --help` on your
-  end before relying on them.
+- I don't have network access to get.digitalasset.com from where I'm
+  working, so I can't install DPM or compile anything myself — everything
+  in this repo has since been built and tested for real against an
+  actual DPM install, though, including the `Distribution.daml`
+  retention layer added after the design review (`Checkpoint3b_Distribution.daml`
+  covers a real reserve reducing the pro-rata split, retention exceeding
+  NOI getting rejected, and negative retention getting rejected — all
+  passing, alongside the rest of the checkpoint suite).

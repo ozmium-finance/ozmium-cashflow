@@ -8,6 +8,7 @@ import DA.Date
 import Daml.Script
 import Ozmium.Attestation
 import Ozmium.Validation
+import Ozmium.Distribution
 import Ozmium.Entitlement
 import Ozmium.Types
 import Ozmium.Setup
@@ -46,8 +47,14 @@ test_entitlementSplitsProRataAcrossThreeHolders = script do
   validatedCid <- submit berlinSpv do
     exerciseCmd attestationCid Attestation_Validate with registryCid, knownPriorEventCids = []
 
+  -- straight pass-through -- BerlinSPV retains nothing, but it's still
+  -- an explicit decision on the ledger, not a shortcut the code takes
+  distributionCid <- submit berlinSpv do
+    exerciseCmd validatedCid ValidatedRevenueEvent_DecideDistribution with
+      retentionAmount = 0.0, retentionReason = ""
+
   entitlementCid <- submit berlinSpv do
-    exerciseCmd validatedCid ValidatedRevenueEvent_CalculateEntitlement with holdingsCid
+    exerciseCmd distributionCid DistributionDecision_CalculateEntitlement with holdingsCid
 
   Some entitlement <- queryContractId berlinSpv entitlementCid
   -- net = 12500 - 500 = 12000; split 50/30/20
@@ -93,8 +100,12 @@ test_entitlementSplitsAcrossTwoHolders = script do
   validatedCid <- submit berlinSpv do
     exerciseCmd attestationCid Attestation_Validate with registryCid, knownPriorEventCids = []
 
+  distributionCid <- submit berlinSpv do
+    exerciseCmd validatedCid ValidatedRevenueEvent_DecideDistribution with
+      retentionAmount = 0.0, retentionReason = ""
+
   entitlementCid <- submit berlinSpv do
-    exerciseCmd validatedCid ValidatedRevenueEvent_CalculateEntitlement with holdingsCid
+    exerciseCmd distributionCid DistributionDecision_CalculateEntitlement with holdingsCid
 
   Some entitlement <- queryContractId berlinSpv entitlementCid
   entitlement.lines ===

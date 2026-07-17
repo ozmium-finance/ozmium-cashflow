@@ -1,0 +1,137 @@
+-- | One command, whole lifecycle, narrated via `debug` so it's actually
+-- watchable during a live demo or a recording. Written because the old
+-- plan of "exercise this choice from BerlinSPV, passing the id from
+-- setup" doesn't really work anymore now that Navigator's gone and
+-- there's no interactive way to poke at a running sandbox by hand --
+-- you'd otherwise be stuck copy-pasting contract ids between separate
+-- `dpm script` runs. This just does the whole thing itself, printing
+-- what it's doing as it goes.
+--
+-- Includes the distribution-decision step added after a design review:
+-- rent doesn't move in one hop, it moves in two -- tenant to property
+-- owner, then owner to shareholders, and the owner doesn't always pass
+-- through 100%. BerlinSPV retains a debt-service reserve here on
+-- purpose, so that assumption is demonstrated rather than left implicit.
+--
+-- Run it with a sandbox up (see the root README's "How to run locally"
+-- section):
+--   dpm script --dar .daml/dist/ozmium-cashflow-0.1.0.dar \
+--     --script-name Ozmium.Demo:runFullDemo \
+--     --ledger-host localhost --ledger-port 6865
+--
+-- Doesn't touch Setup.daml's `setup` -- this allocates its own parties
+-- and its own registry/holdings so it's fully self-contained. Fine to
+-- run on a completely fresh sandbox.
+module Ozmium.Demo where
+
+import DA.Date
+import DA.Foldable (forA_)
+import Daml.Script
+import Ozmium.Types
+import Ozmium.Attestation
+import Ozmium.Validation
+import Ozmium.Distribution
+import Ozmium.Entitlement
+import Ozmium.Settlement
+import Ozmium.Setup
+
+runFullDemo : Script ()
+runFullDemo = do
+  debug "=== Ozmium x Canton Mission demo ==="
+  debug "Tokenization solved who owns this asset -- it didn't solve how the income that asset generates actually moves, correctly and provably, every time."
+  debug "And that income doesn't move in one hop: rent flows from tenant to property owner, and only then does the owner decide what flows on to shareholders. Ozmium makes both of those movements programmable and auditable on Canton -- not just the last one."
+  debug ""
+
+  DemoParties{..} <- allocateDemoParties
+  debug "Allocated demo parties: Admin, PropManagerCo (the attestor), BerlinSPV (the fund), InvestorAlice/Bob/Carol (the token holders)."
+
+  registryCid <- submit admin do
+    createCmd AttestorRegistry with
+      admin
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      authorizedAttestor = propManager
+  debug ("AttestorRegistry created -- PropManagerCo is the registered attestor for berlin-hauptstrasse-12. Id: " <> show registryCid)
+
+  holdingsCid <- submit berlinSpv do
+    createCmd HoldingsSnapshot with
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      holdings =
+        [ (investor1, 0.50)
+        , (investor2, 0.30)
+        , (investor3, 0.20)
+        ]
+  debug ("HoldingsSnapshot created -- Alice 50%, Bob 30%, Carol 20%. Id: " <> show holdingsCid)
+  debug ""
+
+  let periodStart = date 2026 Jul 1
+  let periodEnd   = date 2026 Jul 31
+  let sourceRef   = "statement-2026-07-berlin-hauptstrasse-12"
+
+  debug "--- Step 1: Attestation -- trust enters the system ---"
+  attestationCid <- submit propManager do
+    createCmd RevenueAttestation with
+      attestor = propManager
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      revenueType = Rent
+      periodStart
+      periodEnd
+      grossAmount = 12500.00
+      currency = "EUR"
+      deductions =
+        [ Deduction with deductionType = "management_fee", amount = 500.00
+        , Deduction with deductionType = "servicing_fee", amount = 125.00
+        ]
+      sourceRef
+  debug ("PropManagerCo attests: EUR 12,500 rent collected for July 2026, minus EUR 500 management fee and EUR 125 servicing fee (itemized, not pre-netted). Id: " <> show attestationCid)
+  debug "This is the regulated-attestor model on purpose -- rent is a private fact tied to one lease, there's no public feed to check it against, so someone has to be the accountable source of truth."
+  debug ""
+
+  debug "--- Step 2: Validation -- property-level net operating income ---"
+  validatedCid <- submit berlinSpv do
+    exerciseCmd attestationCid Attestation_Validate with
+      registryCid
+      knownPriorEventCids = []
+  Some validated <- queryContractId berlinSpv validatedCid
+  debug ("Checked against the registry -- right attestor, right asset, period not already validated. Net operating income: EUR " <> show validated.netDistributable <> ". Id: " <> show validatedCid)
+  debug "This is the first hop: tenant to property owner. It is not the last."
+  debug ""
+
+  debug "--- Step 3: Distribution decision -- ownership-level, before anything reaches shareholders ---"
+  distributionCid <- submit berlinSpv do
+    exerciseCmd validatedCid ValidatedRevenueEvent_DecideDistribution with
+      retentionAmount = 1875.00
+      retentionReason = "debt-service reserve"
+  Some distribution <- queryContractId berlinSpv distributionCid
+  debug ("BerlinSPV retains EUR " <> show distribution.retentionAmount <> " (" <> distribution.retentionReason <> ") and passes through EUR " <> show distribution.passThroughAmount <> ". This is a recorded policy choice, not a hardcoded assumption -- a 100%-pass-through fund would go through the same contract with retentionAmount = 0. Id: " <> show distributionCid)
+  debug ""
+
+  debug "--- Step 4: Entitlement calculation ---"
+  entitlementCid <- submit berlinSpv do
+    exerciseCmd distributionCid DistributionDecision_CalculateEntitlement with holdingsCid
+  Some entitlement <- queryContractId berlinSpv entitlementCid
+  debug "The pass-through amount -- not the raw NOI -- splits pro-rata across the three holders:"
+  forA_ entitlement.lines $ \l ->
+    debug ("  " <> show l.holder <> " -- EUR " <> show l.amount)
+  debug ""
+
+  debug "--- Step 5: Settlement -- the auditable payout ---"
+  settlementCids <- submit berlinSpv do
+    exerciseCmd entitlementCid EntitlementCalculation_Settle
+  settlements <- forA settlementCids (queryContractId berlinSpv)
+  debug "One settlement instruction per investor, each carrying the source reference back to July's rent statement:"
+  forA_ [s | Some s <- settlements] $ \s ->
+    debug ("  " <> show s.holder <> " -- EUR " <> show s.amount <> " (traces back to '" <> s.sourceEventRef <> "')")
+  debug ""
+
+  let (firstSettlementCid :: _) = settlementCids
+  paidCid <- submit berlinSpv do
+    exerciseCmd firstSettlementCid Settlement_MarkPaid
+  debug ("First settlement marked Paid, once the actual transfer confirms off-ledger. Id: " <> show paidCid)
+  debug ""
+
+  debug "=== Done. Attestation -> validation -> distribution decision -> entitlement -> settlement, auditable end to end, running on Canton. ==="
+  debug "Notice two things: the retained reserve never reached the pro-rata split, and which chain the property token was actually issued on never came up either. Canton orchestrates the money -- both hops of it -- it doesn't care where the token lives."
+  pure ()
