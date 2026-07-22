@@ -31,7 +31,8 @@ ozmium-cashflow/
 ├── integration/mock-attestor/   # simulates the property manager submitting events
 ├── tests/scenarios/         # Daml Script tests, one file per checkpoint
 ├── multi-package.yaml       # lets `dpm build --all` build all 3 packages together
-└── demo/script.md           # live demo narration
+├── demo/script.md           # live demo narration
+└── dashboard/               # operator/investor/audit-trail web views, reads the JSON API
 ```
 
 One deviation from the Dev Build Guide's tree worth calling out:
@@ -145,6 +146,14 @@ actually use for a live demo or a recording), see `Ozmium.Demo:runFullDemo`
 and `demo/script.md` instead — it allocates its own parties and prints
 readable `debug` output at every step, so there's nothing to copy-paste
 between separate script runs.
+
+For the operator/investor/audit-trail web views, see
+`dashboard/README.md` — same idea, two terminals: `dpm sandbox` in one,
+`npm run dev` (inside `dashboard/`) in the other. Docker was tried for
+packaging this into one command and abandoned after hitting a
+Docker-Desktop/WSL2 networking restriction that couldn't be worked
+around from inside a container — the two plain terminals are the
+reliable path, not a fallback.
 
 ## How to deploy (Canton test/Mission environment)
 
@@ -273,6 +282,16 @@ reference matches the original attestation.
   records that the SPV made a call and what it was.
 - Entitlement calculation itself is pro-rata only — no tranches, hurdle
   rates, or fee-on-fee logic yet.
+- `EntitlementCalculation` is one shared contract per event with every
+  holder listed as an observer, so any one investor's participant can
+  technically see every other holder's line, not just their own —
+  found this while building the investor dashboard view, which has to
+  filter down to "your own line" client-side rather than relying on the
+  ledger to only show that party their own data. `SettlementInstruction`
+  doesn't have this problem (one holder per contract), so payouts
+  themselves stay private; it's specifically the entitlement calculation
+  step. A real fix is per-holder entitlement contracts instead of one
+  shared one — bigger change, not done here.
 - `AttestorRegistry` is governed by one admin party. Since this is
   actually the trust root of the whole system, a real deployment
   probably wants multi-sig or a committee here, plus an actual legal
