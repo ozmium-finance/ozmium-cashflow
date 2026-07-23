@@ -111,8 +111,17 @@ jobs:
           # restarts (a crash, an OOM-kill, a host reboot) between deploys,
           # so those don't wipe the demo mid-session -- only an actual
           # deploy, via this step, resets it.
-          ssh root@${{ vars.SCW_INSTANCE_IP }} "docker run --rm postgres:16 psql \
-            'postgresql://${{ vars.SCW_DB_USER }}:${{ secrets.SCW_DB_PASSWORD }}@${{ vars.SCW_DB_HOST }}:${{ vars.SCW_DB_PORT }}/${{ vars.SCW_DB_NAME }}?sslmode=require' \
+          # Plain -h/-p/-U/-d flags + PGPASSWORD/PGSSLMODE env vars instead of
+          # a postgresql:// URI -- the DB password can contain characters
+          # like # or @ that a URI parser reads as syntax (a bare # in
+          # particular gets treated as the start of the URI fragment,
+          # silently truncating everything after it, which is exactly what
+          # broke this the first time). Flags avoid that entirely.
+          ssh root@${{ vars.SCW_INSTANCE_IP }} "docker run --rm \
+            -e PGPASSWORD='${{ secrets.SCW_DB_PASSWORD }}' \
+            -e PGSSLMODE=require \
+            postgres:16 psql \
+            -h '${{ vars.SCW_DB_HOST }}' -p '${{ vars.SCW_DB_PORT }}' -U '${{ vars.SCW_DB_USER }}' -d '${{ vars.SCW_DB_NAME }}' \
             -c 'DROP DATABASE IF EXISTS ${{ vars.SCW_DB_NAME }}_participant1;' \
             -c 'DROP DATABASE IF EXISTS ${{ vars.SCW_DB_NAME }}_sequencer1;' \
             -c 'DROP DATABASE IF EXISTS ${{ vars.SCW_DB_NAME }}_mediator1;' \
