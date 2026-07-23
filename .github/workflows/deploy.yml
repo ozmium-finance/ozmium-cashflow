@@ -66,6 +66,10 @@ jobs:
           mkdir -p ~/.ssh
           ssh-keyscan -H "${{ vars.SCW_INSTANCE_IP }}" >> ~/.ssh/known_hosts
 
+      - name: Create deploy folder on the Instance
+        run: |
+          ssh root@${{ vars.SCW_INSTANCE_IP }} "mkdir -p /opt/ozmium-cashflow"
+
       - name: Copy compose file to the Instance
         run: |
           scp deploy/docker-compose.yml \
@@ -73,7 +77,7 @@ jobs:
 
       - name: Write .env and restart the stack
         run: |
-          ssh root@${{ vars.SCW_INSTANCE_IP }} "mkdir -p /opt/ozmium-cashflow && cat > /opt/ozmium-cashflow/.env" <<EOF
+          ssh root@${{ vars.SCW_INSTANCE_IP }} "cat > /opt/ozmium-cashflow/.env" <<EOF
           SCW_REGISTRY=${{ vars.SCW_REGISTRY }}
           IMAGE_TAG=${{ needs.build-and-push.outputs.image_tag }}
           POSTGRES_HOST=${{ vars.SCW_DB_HOST }}
