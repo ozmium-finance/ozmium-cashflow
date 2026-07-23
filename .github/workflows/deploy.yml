@@ -135,6 +135,19 @@ jobs:
           ssh root@${{ vars.SCW_INSTANCE_IP }} "echo '${{ secrets.SCW_SECRET_KEY }}' | docker login $REGISTRY_HOST -u nologin --password-stdin"
           ssh root@${{ vars.SCW_INSTANCE_IP }} "cd /opt/ozmium-cashflow && docker compose pull && docker compose up -d"
 
+      - name: Clean up old images
+        run: |
+          # Every deploy pushes a brand-new SHA-tagged image, so without
+          # this the Instance's disk fills up over a handful of deploys
+          # (that's what just happened -- 37GB of stale images from
+          # previous deploys, plus the postgres:16 image pulled fresh for
+          # the database-reset step above). -a removes any image not used
+          # by a running container, not just dangling/untagged ones, which
+          # is what actually clears out old canton/dashboard tags -- safe
+          # to run here since compose has already switched every service
+          # over to the new images.
+          ssh root@${{ vars.SCW_INSTANCE_IP }} "docker image prune -af" || true
+
 # One-time setup this workflow depends on but can't do for itself:
 #
 # 1. Repo Settings -> Environments -> New environment, name it exactly
