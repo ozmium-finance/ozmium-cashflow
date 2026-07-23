@@ -1,0 +1,69 @@
+// Replaces dpm sandbox's own built-in bootstrap script (extracted from
+// canton-open-source-3.5.6.jar's sandbox/bootstrap.canton, for reference)
+// with an idempotent version.
+//
+// Why this file exists at all: dpm sandbox's own bootstrap always tries
+// to create the embedded synchronizer and propose the participant's trust
+// certificate, unconditionally, on every single startup. Against
+// in-memory storage that's harmless -- every start really is a blank
+// slate. Against the persisted Postgres storage this project actually
+// uses, every restart after the first successful one replays the same
+// proposal against state that already has it, and Canton refuses with
+// TOPOLOGY_MAPPING_ALREADY_EXISTS -- which crashes the whole node, which
+// Docker then restarts, which crashes again, forever. That's the bug
+// this file fixes.
+//
+// The only change from the original is the try/catch around the
+// synchronizer bootstrap + connect + trust-cert-propose sequence: on a
+// fresh participant, this behaves identically to the original (nothing
+// exists yet, so nothing throws). On a restart, the propose call throws
+// exactly the "already exists" error above, which is expected and
+// harmless -- the participant is already connected, there's nothing left
+// to do -- so it's logged and skipped instead of taking the whole node
+// down. Confirmed against a real already-bootstrapped deployment before
+// this was wired in (see deploy runbook / chat history).
+//
+// DAR upload is handled separately via the declarative API in
+// canton-production.conf (alpha-dynamic.dars), not here, since that
+// mechanism is already idempotent by design -- no custom guard needed.
+import com.digitalasset.canton.config.RequireTypes.PositiveInt
+import com.digitalasset.canton.version.ProtocolVersion
+val protocol = ProtocolVersion.forSynchronizer
+case class SyncDef(
+  mediator: com.digitalasset.canton.console.LocalMediatorReference,
+  sequencer: com.digitalasset.canton.console.LocalSequencerReference,
+  name: String
+)
+val syncDefs = mediators.local
+  .zip(sequencers.local)
+  .zipWithIndex
+  .map { case ((m, s), i) => SyncDef(m, s, s"synchronizer-${i + 1}") }
+val featureFlag = Seq(SynchronizerTrustCertificate.ParticipantTopologyFeatureFlag.EnableMultiSynchronizer)
+syncDefs.foreach{ syncDef =>
+  try {
+    val staticSynchronizerParameters = StaticSynchronizerParameters.defaults(
+      syncDef.sequencer.config.crypto,
+      protocol,
+      topologyChangeDelay=NonNegativeFiniteDuration.Zero
+    )
+    val synchronizerOwners = Seq(syncDef.sequencer, syncDef.mediator)
+    val synchId = bootstrap.synchronizer(
+      syncDef.name,
+      Seq(syncDef.sequencer),
+      Seq(syncDef.mediator),
+      synchronizerOwners,
+      PositiveInt.one,
+      staticSynchronizerParameters
+    )
+    participants.local.foreach(p => {
+      p.synchronizers.connect_local(syncDef.sequencer, syncDef.name)
+      p.topology.synchronizer_trust_certificates.propose(p, synchId.logical, featureFlags = featureFlag)
+    })
+  } catch {
+    case e: Throwable =>
+      println(s"${syncDef.name} bootstrap skipped (already set up from a previous run): ${e.getMessage}")
+  }
+}
+participants.local.foreach{p =>
+  println(s"${p.name} listening at ports: ${p.config.ledgerApi.port.unwrap}(gRPC) and ${p.config.httpLedgerApi.port.unwrap}(HTTP)")}
+println("Canton sandbox is ready.")

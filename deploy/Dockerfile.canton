@@ -33,6 +33,24 @@ RUN dpm install package
 RUN dpm build
 
 COPY deploy/canton-production.conf ./deploy/canton-production.conf
+COPY deploy/canton-bootstrap.canton ./deploy/canton-bootstrap.canton
+COPY deploy/canton-entrypoint.sh ./deploy/canton-entrypoint.sh
+RUN chmod +x ./deploy/canton-entrypoint.sh
+
+# dpm sandbox's own default topology config (participant "sandbox",
+# sequencer "sequencer1", mediator "mediator1") lives inside the
+# canton-open-source jar dpm already pulled down above, as
+# sandbox/sandbox.conf. canton-entrypoint.sh runs Canton's `daemon`
+# command directly instead of `dpm sandbox` (see that file's own comment
+# for why), which means that default topology doesn't get merged in for
+# free the way it does for the `sandbox` command -- so it's extracted
+# here at build time and merged back in ourselves at startup.
+RUN CANTON_JAR="$(find /opt/dpm/cache/components/canton-open-source -name 'canton-open-source-*.jar' | head -1)" \
+    && mkdir -p ./deploy/canton-defaults \
+    && cd ./deploy/canton-defaults \
+    && jar xf "$CANTON_JAR" sandbox/sandbox.conf \
+    && mv sandbox/sandbox.conf ./sandbox-defaults.conf \
+    && rmdir sandbox
 
 # Ledger API (6865) and Admin API (6866) stay bound to localhost inside
 # the container per canton-production.conf, so they're not published
@@ -40,7 +58,4 @@ COPY deploy/canton-production.conf ./deploy/canton-production.conf
 # to 0.0.0.0, is meant to be reached from outside this container.
 EXPOSE 7575
 
-ENTRYPOINT ["dpm", "sandbox", \
-            "--config", "deploy/canton-production.conf", \
-            "--json-api-port", "7575", \
-            "--dar", ".daml/dist/ozmium-cashflow-0.1.0.dar"]
+ENTRYPOINT ["./deploy/canton-entrypoint.sh"]
