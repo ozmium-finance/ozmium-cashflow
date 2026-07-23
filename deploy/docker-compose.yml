@@ -9,7 +9,7 @@
 #
 # Expects a .env file alongside it (the deploy workflow writes this from
 # GitHub secrets/variables) with:
-#   SCW_REGISTRY, IMAGE_TAG,
+#   SCW_REGISTRY, IMAGE_TAG, CADDY_DOMAIN,
 #   POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
 #
 # Canton requires each of its three nodes (participant, sequencer,
@@ -21,6 +21,15 @@
 # ever starts) -- so POSTGRES_DB=rdb becomes rdb_participant1,
 # rdb_sequencer1, rdb_mediator1. All three need to already exist on the
 # Postgres server before this is run for the first time.
+#
+# Caddy sits in front of the dashboard and is the only thing that binds
+# host ports 80/443 -- it terminates TLS (auto-provisioned via Let's
+# Encrypt for CADDY_DOMAIN) and reverse-proxies to the dashboard container
+# over Compose's internal network. The dashboard itself is no longer
+# published to the host directly. caddy_data is a named volume so the
+# issued certificate survives `docker compose up` being re-run on every
+# deploy -- without it we'd re-request a cert from Let's Encrypt every
+# push and eventually hit their rate limit.
 
 services:
   canton:
@@ -56,7 +65,24 @@ services:
     environment:
       JSON_API_HOST: canton
       JSON_API_PORT: "7575"
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - dashboard
+    environment:
+      CADDY_DOMAIN: ${CADDY_DOMAIN}
     ports:
-      # No custom domain -- this is what makes the demo reachable at
-      # http://<instance-ip>/ with no port number to remember.
-      - "80:3000"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

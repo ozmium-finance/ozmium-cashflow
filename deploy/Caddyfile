@@ -1,0 +1,19 @@
+# Reverse proxy in front of the dashboard container. Caddy's whole reason
+# for being here is that it gets and renews a Let's Encrypt certificate for
+# CADDY_DOMAIN automatically -- no certbot, no manual renewal cron.
+#
+# CADDY_DOMAIN is a free sslip.io hostname (163-172-155-168.sslip.io) that
+# just resolves to the Instance's own IP -- that's enough for Let's Encrypt,
+# which only needs a real domain name it can look up, not anything owned or
+# registered. If a real domain gets pointed at this box later, changing
+# CADDY_DOMAIN in the deploy .env is the only thing that needs to change.
+#
+# Plain HTTP still works (Caddy answers ACME's http-01 challenge on :80 and
+# also redirects any other :80 traffic to https automatically) -- so this
+# also incidentally fixes the original problem: browsers hitting :80 get
+# redirected straight to the encrypted version instead of a rewritable
+# plaintext response.
+
+{$CADDY_DOMAIN} {
+	reverse_proxy dashboard:3000
+}

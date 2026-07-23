@@ -70,16 +70,19 @@ jobs:
         run: |
           ssh root@${{ vars.SCW_INSTANCE_IP }} "mkdir -p /opt/ozmium-cashflow"
 
-      - name: Copy compose file to the Instance
+      - name: Copy compose file and Caddyfile to the Instance
         run: |
           scp deploy/docker-compose.yml \
             root@${{ vars.SCW_INSTANCE_IP }}:/opt/ozmium-cashflow/docker-compose.yml
+          scp deploy/Caddyfile \
+            root@${{ vars.SCW_INSTANCE_IP }}:/opt/ozmium-cashflow/Caddyfile
 
       - name: Write .env and restart the stack
         run: |
           ssh root@${{ vars.SCW_INSTANCE_IP }} "cat > /opt/ozmium-cashflow/.env" <<EOF
           SCW_REGISTRY=${{ vars.SCW_REGISTRY }}
           IMAGE_TAG=${{ needs.build-and-push.outputs.image_tag }}
+          CADDY_DOMAIN=${{ vars.CADDY_DOMAIN }}
           POSTGRES_HOST=${{ vars.SCW_DB_HOST }}
           POSTGRES_PORT=${{ vars.SCW_DB_PORT }}
           POSTGRES_DB=${{ vars.SCW_DB_NAME }}
@@ -106,3 +109,9 @@ jobs:
 #    Settings -> Secrets and variables -> Actions -> Variables if it
 #    isn't there yet, alongside the SCW_REGISTRY/SCW_DB_* variables
 #    already set up.
+#
+# 3. Also add a GitHub Variable CADDY_DOMAIN set to
+#    163-172-155-168.sslip.io -- a free hostname that just resolves to
+#    the Instance's own IP, which is all Let's Encrypt needs to issue a
+#    certificate (it doesn't have to be a domain anyone owns). Caddy uses
+#    this to get HTTPS working automatically -- see deploy/Caddyfile.
