@@ -1,0 +1,27 @@
+# Builds and runs the Next.js dashboard for the deployed environment.
+# Same app as `dashboard/`, no code changes needed for deployment --
+# only JSON_API_HOST/JSON_API_PORT (set as container env vars at deploy
+# time, see deploy/docker-compose.yml) point it at the canton container
+# instead of localhost.
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY dashboard/package.json dashboard/package-lock.json ./
+RUN npm ci
+COPY dashboard/ ./
+RUN npm run build
+RUN npm prune --production
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+# curl because pages/api/v2/[...path].js shells out to it rather than
+# using Node's own http client -- see dashboard/README.md for why.
+RUN apk add --no-cache curl
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/next.config.js ./next.config.js
+# No public/ folder in this app (no static assets outside pages/components) --
+# add a COPY line here if one gets added later.
+
+EXPOSE 3000
+CMD ["npx", "next", "start", "-H", "0.0.0.0", "-p", "3000"]

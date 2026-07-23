@@ -1,0 +1,104 @@
+name: Deploy
+
+# Runs on every push to main (i.e. every merge). Two jobs:
+#   1. build-and-push -- builds both images, pushes to Scaleway Container
+#      Registry. Runs immediately, no gate.
+#   2. deploy -- SSHes into the Scaleway Instance and restarts the stack
+#      with the new images. Gated by the "production" GitHub Environment
+#      below, so it pauses for a manual approval before running -- see
+#      the note at the bottom of this file for the one-time setup step
+#      that turns that gate on.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.tag.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: tag
+        run: echo "value=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to Scaleway Container Registry
+        run: |
+          REGISTRY_HOST="$(echo "${{ vars.SCW_REGISTRY }}" | cut -d/ -f1)"
+          echo "${{ secrets.SCW_SECRET_KEY }}" | docker login "$REGISTRY_HOST" -u nologin --password-stdin
+
+      - name: Build canton image
+        run: |
+          docker build -f deploy/Dockerfile.canton \
+            -t "${{ vars.SCW_REGISTRY }}/canton:${{ steps.tag.outputs.value }}" \
+            -t "${{ vars.SCW_REGISTRY }}/canton:latest" \
+            .
+
+      - name: Build dashboard image
+        run: |
+          docker build -f deploy/Dockerfile.dashboard \
+            -t "${{ vars.SCW_REGISTRY }}/dashboard:${{ steps.tag.outputs.value }}" \
+            -t "${{ vars.SCW_REGISTRY }}/dashboard:latest" \
+            .
+
+      - name: Push images
+        run: |
+          docker push "${{ vars.SCW_REGISTRY }}/canton:${{ steps.tag.outputs.value }}"
+          docker push "${{ vars.SCW_REGISTRY }}/canton:latest"
+          docker push "${{ vars.SCW_REGISTRY }}/dashboard:${{ steps.tag.outputs.value }}"
+          docker push "${{ vars.SCW_REGISTRY }}/dashboard:latest"
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Load deploy SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SCW_SSH_PRIVATE_KEY }}
+
+      - name: Trust the Instance's host key
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ vars.SCW_INSTANCE_IP }}" >> ~/.ssh/known_hosts
+
+      - name: Copy compose file to the Instance
+        run: |
+          scp deploy/docker-compose.yml \
+            root@${{ vars.SCW_INSTANCE_IP }}:/opt/ozmium-cashflow/docker-compose.yml
+
+      - name: Write .env and restart the stack
+        run: |
+          ssh root@${{ vars.SCW_INSTANCE_IP }} "mkdir -p /opt/ozmium-cashflow && cat > /opt/ozmium-cashflow/.env" <<EOF
+          SCW_REGISTRY=${{ vars.SCW_REGISTRY }}
+          IMAGE_TAG=${{ needs.build-and-push.outputs.image_tag }}
+          POSTGRES_HOST=${{ vars.SCW_DB_HOST }}
+          POSTGRES_PORT=${{ vars.SCW_DB_PORT }}
+          POSTGRES_DB=${{ vars.SCW_DB_NAME }}
+          POSTGRES_USER=${{ vars.SCW_DB_USER }}
+          POSTGRES_PASSWORD=${{ secrets.SCW_DB_PASSWORD }}
+          EOF
+
+          REGISTRY_HOST="$(echo "${{ vars.SCW_REGISTRY }}" | cut -d/ -f1)"
+          ssh root@${{ vars.SCW_INSTANCE_IP }} "echo '${{ secrets.SCW_SECRET_KEY }}' | docker login $REGISTRY_HOST -u nologin --password-stdin"
+          ssh root@${{ vars.SCW_INSTANCE_IP }} "cd /opt/ozmium-cashflow && docker compose pull && docker compose up -d"
+
+# One-time setup this workflow depends on but can't do for itself:
+#
+# 1. Repo Settings -> Environments -> New environment, name it exactly
+#    "production" (matches `environment: production` above), and add
+#    yourself (or whoever should approve deploys) as a required
+#    reviewer. Once that's saved, every run of the `deploy` job pauses
+#    and waits for that approval before touching the server -- the
+#    build-and-push job still runs unattended, only the deploy half
+#    waits.
+#
+# 2. This workflow assumes a GitHub Variable SCW_INSTANCE_IP is set to
+#    163.172.155.168 (the existing Instance's IP) -- add it under
+#    Settings -> Secrets and variables -> Actions -> Variables if it
+#    isn't there yet, alongside the SCW_REGISTRY/SCW_DB_* variables
+#    already set up.

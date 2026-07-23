@@ -1,0 +1,47 @@
+name: Test
+
+# Runs on every PR into main. Doesn't touch Scaleway or deploy anything --
+# just proves the Daml build/tests pass and the dashboard still builds
+# before a merge is allowed to trigger deploy.yml.
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  daml:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Install dpm
+        run: |
+          curl -sSL https://get.digitalasset.com/install/install.sh | sh
+          echo "$HOME/.dpm/bin" >> "$GITHUB_PATH"
+
+      - name: dpm build --all
+        run: dpm build --all
+
+      - name: dpm test
+        run: dpm test
+
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: dashboard/package-lock.json
+
+      - run: npm ci
+      - run: npm run build

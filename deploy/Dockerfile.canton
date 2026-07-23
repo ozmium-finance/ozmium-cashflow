@@ -1,0 +1,46 @@
+# Builds and runs the Canton participant for the deployed environment.
+#
+# This is a different situation from the Docker Desktop/WSL2 attempt
+# that got abandoned earlier in this project: that one hit a networking
+# restriction specific to Docker Desktop's WSL2 backend on the dev
+# machine. This image runs on a real Linux server (the Scaleway
+# Instance), where plain `docker run -p` port publishing works normally
+# -- no socat/iptables workaround needed here.
+#
+# JDK (not just JRE) because Digital Asset's own install docs list "JDK
+# 17+, on JAVA_HOME" as a dpm prerequisite.
+FROM eclipse-temurin:21-jdk
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      curl ca-certificates bash \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV DPM_HOME=/opt/dpm
+ENV PATH="${DPM_HOME}/bin:${PATH}"
+
+RUN curl -sSL https://get.digitalasset.com/install/install.sh | sh
+
+WORKDIR /app
+
+# Only the root package's own sources -- tests/scenarios and
+# integration/mock-attestor aren't needed to run the deployed ledger,
+# so multi-package.yaml and `dpm build --all` are skipped in favor of
+# building just this one package.
+COPY daml.yaml ./
+COPY daml ./daml
+
+RUN dpm install package
+RUN dpm build
+
+COPY deploy/canton-production.conf ./deploy/canton-production.conf
+
+# Ledger API (6865) and Admin API (6866) stay bound to localhost inside
+# the container per canton-production.conf, so they're not published
+# here -- only the JSON API (7575), which canton-production.conf binds
+# to 0.0.0.0, is meant to be reached from outside this container.
+EXPOSE 7575
+
+ENTRYPOINT ["dpm", "sandbox", \
+            "--config", "deploy/canton-production.conf", \
+            "--json-api-port", "7575", \
+            "--dar", ".daml/dist/ozmium-cashflow-0.1.0.dar"]

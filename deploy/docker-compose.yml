@@ -1,0 +1,50 @@
+# Runs ONLY on the Scaleway Instance -- the deploy workflow copies this
+# file there and runs `docker compose up -d`. Not meant for local dev;
+# local dev is still the plain `dpm sandbox` + `npm run dev` two-terminal
+# workflow described in the root README and dashboard/README.md.
+#
+# Images are pre-built in GitHub Actions and pushed to Scaleway Container
+# Registry -- this file only pulls and runs them, it doesn't build
+# anything on the server itself.
+#
+# Expects a .env file alongside it (the deploy workflow writes this from
+# GitHub secrets/variables) with:
+#   SCW_REGISTRY, IMAGE_TAG,
+#   POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
+
+services:
+  canton:
+    image: ${SCW_REGISTRY}/canton:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      POSTGRES_HOST: ${POSTGRES_HOST}
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    # Only the JSON API needs to be reachable at all, and only from the
+    # dashboard container -- not published to the host, Compose's
+    # internal network already lets the dashboard container reach it at
+    # http://canton:7575.
+    expose:
+      - "7575"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7575/v2/version"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  dashboard:
+    image: ${SCW_REGISTRY}/dashboard:${IMAGE_TAG}
+    restart: unless-stopped
+    depends_on:
+      canton:
+        condition: service_healthy
+    environment:
+      JSON_API_HOST: canton
+      JSON_API_PORT: "7575"
+    ports:
+      # No custom domain -- this is what makes the demo reachable at
+      # http://<instance-ip>/ with no port number to remember.
+      - "80:3000"
