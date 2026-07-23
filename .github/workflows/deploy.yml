@@ -77,7 +77,7 @@ jobs:
           scp deploy/Caddyfile \
             root@${{ vars.SCW_INSTANCE_IP }}:/opt/ozmium-cashflow/Caddyfile
 
-      - name: Write .env and restart the stack
+      - name: Write .env
         run: |
           ssh root@${{ vars.SCW_INSTANCE_IP }} "cat > /opt/ozmium-cashflow/.env" <<EOF
           SCW_REGISTRY=${{ vars.SCW_REGISTRY }}
@@ -90,6 +90,38 @@ jobs:
           POSTGRES_PASSWORD=${{ secrets.SCW_DB_PASSWORD }}
           EOF
 
+      - name: Stop the old stack
+        run: |
+          ssh root@${{ vars.SCW_INSTANCE_IP }} "cd /opt/ozmium-cashflow && docker compose stop canton" || true
+
+      - name: Reset canton's databases for a clean demo on every deploy
+        run: |
+          # This project's demo is meant to be clicked through from scratch
+          # each time (see the dashboard's own "1. Setup" -> "9. Mark third
+          # payment paid" demo controls) -- so every deploy wipes the three
+          # canton databases and lets Canton recreate them from nothing,
+          # rather than resuming whatever state was left over from the
+          # previous deploy. This runs after the old canton container is
+          # stopped (above) so nothing still holds a connection to these
+          # databases -- Postgres refuses to drop a database that has
+          # active connections.
+          #
+          # This is deliberately separate from the restart-safety fix in
+          # canton-bootstrap.canton: that fix protects against *unplanned*
+          # restarts (a crash, an OOM-kill, a host reboot) between deploys,
+          # so those don't wipe the demo mid-session -- only an actual
+          # deploy, via this step, resets it.
+          ssh root@${{ vars.SCW_INSTANCE_IP }} "docker run --rm postgres:16 psql \
+            'postgresql://${{ vars.SCW_DB_USER }}:${{ secrets.SCW_DB_PASSWORD }}@${{ vars.SCW_DB_HOST }}:${{ vars.SCW_DB_PORT }}/${{ vars.SCW_DB_NAME }}?sslmode=require' \
+            -c 'DROP DATABASE IF EXISTS ${{ vars.SCW_DB_NAME }}_participant1;' \
+            -c 'DROP DATABASE IF EXISTS ${{ vars.SCW_DB_NAME }}_sequencer1;' \
+            -c 'DROP DATABASE IF EXISTS ${{ vars.SCW_DB_NAME }}_mediator1;' \
+            -c 'CREATE DATABASE ${{ vars.SCW_DB_NAME }}_participant1;' \
+            -c 'CREATE DATABASE ${{ vars.SCW_DB_NAME }}_sequencer1;' \
+            -c 'CREATE DATABASE ${{ vars.SCW_DB_NAME }}_mediator1;'"
+
+      - name: Pull and start the new stack
+        run: |
           REGISTRY_HOST="$(echo "${{ vars.SCW_REGISTRY }}" | cut -d/ -f1)"
           ssh root@${{ vars.SCW_INSTANCE_IP }} "echo '${{ secrets.SCW_SECRET_KEY }}' | docker login $REGISTRY_HOST -u nologin --password-stdin"
           ssh root@${{ vars.SCW_INSTANCE_IP }} "cd /opt/ozmium-cashflow && docker compose pull && docker compose up -d"
