@@ -11,6 +11,16 @@
 # GitHub secrets/variables) with:
 #   SCW_REGISTRY, IMAGE_TAG,
 #   POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
+#
+# Canton requires each of its three nodes (participant, sequencer,
+# mediator) to have its own separate database -- see the comment at the
+# top of canton-production.conf for why. Rather than needing three
+# separate GitHub variables, the three database names are derived here
+# from the one POSTGRES_DB value by suffixing it (Compose's own
+# ${VAR}suffix interpolation, resolved from .env before the container
+# ever starts) -- so POSTGRES_DB=rdb becomes rdb_participant1,
+# rdb_sequencer1, rdb_mediator1. All three need to already exist on the
+# Postgres server before this is run for the first time.
 
 services:
   canton:
@@ -19,7 +29,9 @@ services:
     environment:
       POSTGRES_HOST: ${POSTGRES_HOST}
       POSTGRES_PORT: ${POSTGRES_PORT}
-      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_DB_PARTICIPANT: ${POSTGRES_DB}_participant1
+      POSTGRES_DB_SEQUENCER: ${POSTGRES_DB}_sequencer1
+      POSTGRES_DB_MEDIATOR: ${POSTGRES_DB}_mediator1
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     # Only the JSON API needs to be reachable at all, and only from the
