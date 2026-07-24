@@ -46,13 +46,19 @@ Originally built without npm registry access from where I'm working, so
 `npm install`/`next build` couldn't be run before handing it over --
 that's since been confirmed working for real (`npm install`, `npm run
 dev`, and a production `next build` have all succeeded against a live
-`dpm sandbox`). Docker packaging was also tried on top of this (see the
-git history / prior conversation if you're looking for it) and dropped
-after hitting a Docker Desktop/WSL2 networking restriction specific to
-exposing Canton's loopback-only JSON API from inside a container --
-unrelated to the dashboard itself, which was never the problem. Two
-plain terminals (`dpm sandbox`, then `npm run dev` here) is the
-supported way to run this, not a fallback.
+`dpm sandbox`). Docker packaging for this *local* two-terminal workflow
+was also tried on top of this (see the git history / prior conversation
+if you're looking for it) and dropped after hitting a Docker
+Desktop/WSL2 networking restriction specific to exposing Canton's
+loopback-only JSON API from inside a container -- unrelated to the
+dashboard itself, which was never the problem. Two plain terminals
+(`dpm sandbox`, then `npm run dev` here) is the supported way to run
+this locally, not a fallback.
+
+Separately, this same dashboard image *is* built and run in Docker
+successfully as part of the real production deployment on Scaleway --
+that's a plain Linux server, not Docker Desktop/WSL2, so the networking
+restriction above doesn't apply there. See `../deploy/README.md`.
 
 ## What's intentionally different from the old dashboard
 

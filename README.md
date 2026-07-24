@@ -150,12 +150,30 @@ between separate script runs.
 For the operator/investor/audit-trail web views, see
 `dashboard/README.md` — same idea, two terminals: `dpm sandbox` in one,
 `npm run dev` (inside `dashboard/`) in the other. Docker was tried for
-packaging this into one command and abandoned after hitting a
+*this local two-terminal workflow* and abandoned after hitting a
 Docker-Desktop/WSL2 networking restriction that couldn't be worked
 around from inside a container — the two plain terminals are the
-reliable path, not a fallback.
+reliable path for local dev, not a fallback. That restriction is
+specific to Docker Desktop on Windows; it doesn't apply to the real
+Linux deployment below, which does run everything in Docker
+successfully — see `deploy/README.md`.
 
-## How to deploy (Canton test/Mission environment)
+## Live deployment
+
+This project is deployed for real, not just runnable locally: a
+Scaleway Cloud instance running Canton (Postgres-backed, so ledger
+state survives restarts) and the dashboard in Docker Compose, behind
+Caddy for HTTPS, with a GitHub Actions pipeline that builds, tests, and
+deploys on every push to `main` (deploy gated by manual approval). See
+`deploy/README.md` for the full architecture, required secrets, and the
+handful of non-obvious things that had to be fixed to get Canton
+running reliably under Docker with persistent storage.
+
+## How to deploy to a shared Canton testnet (Mission environment)
+
+This is the manual, non-Dockerized path for uploading straight to a
+shared/external Canton participant — different from the Scaleway setup
+above, which is this project's own dedicated deployment.
 
 1. Get the participant node URL and party allocation process sorted with
    whoever's running the shared Canton testnet early — the Dev Build
