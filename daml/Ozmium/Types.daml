@@ -6,12 +6,29 @@ module Ozmium.Types where
 
 -- | What kind of event we're attesting to. `Other` is just an escape
 -- hatch for stuff we haven't modeled yet (fund distributions, etc).
+-- `TokenVesting` added for the Mission 2 standalone Distribution Engine
+-- work -- a vesting checkpoint/TGE release, as opposed to a recurring
+-- revenue period.
 data RevenueType
   = Rent
   | Coupon
   | LoanRepayment
   | Distribution
+  | TokenVesting
   | Other
+  deriving (Eq, Show)
+
+-- | Which entitlement-table shape produced a given EntitlementCalculation
+-- -- recorded on the calculation itself so a report/audit trail can say
+-- which one without needing to reconstruct it from context. Deliberately
+-- a plain enum with no embedded ContractId reference (unlike, say,
+-- carrying the actual HoldingsSnapshot/AllocationTable id inline) so
+-- this can live in Types.daml at the bottom of the module graph instead
+-- of forcing a dependency between Entitlement.daml and Allocation.daml
+-- in both directions.
+data BasisKind
+  = Waterfall     -- ^ recurring per-period split against a HoldingsSnapshot (Entitlement.daml)
+  | FixedVesting  -- ^ static allocation released against a vesting schedule (Allocation.daml)
   deriving (Eq, Show)
 
 -- | One deduction against the gross amount (management fee, servicing

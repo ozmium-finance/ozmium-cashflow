@@ -35,6 +35,18 @@ template HoldingsSnapshot
 -- a signatory here (alongside fund) so the chain back to the original
 -- attestation is baked into the ledger itself, not something you have
 -- to reconstruct from logs later.
+--
+-- This is the shared "entitlement table" shape both the waterfall
+-- (this module) and fixed/vesting (Ozmium.Allocation, added for Mission
+-- 2's standalone Distribution Engine) computations produce -- same
+-- fields either way, `basis` just records which one. `fund`/`attestor`
+-- hold the issuer for a FixedVesting calculation (there's no separate
+-- attestor party in that flow, see Allocation.daml), and
+-- `periodStart`/`periodEnd` both hold the release's as-of date rather
+-- than a real period, since a vesting release is a point in time, not a
+-- period -- documented here rather than adding basis-specific optional
+-- fields, to keep this one shape genuinely shared rather than a union
+-- with unused fields depending on which basis produced it.
 template EntitlementCalculation
   with
     fund              : Party
@@ -47,6 +59,7 @@ template EntitlementCalculation
     netDistributable  : Decimal
     lines             : [EntitlementLine]
     sourceRef         : Text
+    basis             : BasisKind
   where
     signatory fund, attestor
     observer [l.holder | l <- lines]

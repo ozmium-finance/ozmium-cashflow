@@ -78,3 +78,4 @@ template DistributionDecision
           netDistributable = passThroughAmount
           lines
           sourceRef
+          basis = Waterfall

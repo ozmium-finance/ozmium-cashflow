@@ -1,0 +1,142 @@
+-- | The second entitlement-table shape, added for Mission 2's
+-- standalone Distribution Engine: a fixed allocation released against a
+-- vesting/cliff schedule, triggered by a single event (TGE) instead of
+-- a recurring one. Built and validated against Ozmium's own $OZM SAFT
+-- distribution, per the brief.
+--
+-- Deliberately does NOT go through RevenueAttestation ->
+-- ValidatedRevenueEvent -> DistributionDecision the way the waterfall
+-- case does (Attestation.daml / Validation.daml / Distribution.daml) --
+-- that chain models a recurring revenue-collection-then-retention-
+-- decision process (tenants pay rent, the SPV nets out opex, then
+-- decides how much to retain vs pass through), and a token vesting
+-- release genuinely isn't that: there's no revenue coming in and no
+-- retention decision, just a static cap table unlocking against time.
+-- Forcing it through that chain would mean inventing meaningless values
+-- for netOperatingIncome/retentionAmount/periodStart-periodEnd-as-a-
+-- real-period, which is worse than having two short, honest entry
+-- points that converge on the same EntitlementCalculation/
+-- SettlementInstruction shape downstream. That convergence -- not
+-- identical upstream steps -- is what "shares the same entitlement
+-- table and API" actually means; see EntitlementCalculation's own
+-- comment in Entitlement.daml.
+--
+-- AllocationTable.issuer is both the signatory and the controller of
+-- the release choice below, i.e. the issuer is trusted by construction
+-- to trigger their own cap table's vesting -- unlike the waterfall
+-- case, there's no separate attestor whose claim needs checking against
+-- an AttestorRegistry first. If the regulatory story ends up wanting
+-- that same registry-backed check here too, that's a small add: fetch
+-- an AttestorRegistry and assert issuer == authorizedAttestor before
+-- proceeding, same as Attestation_Validate does.
+module Ozmium.Allocation where
+
+import DA.Date (subDate)
+import Ozmium.Types
+import Ozmium.Entitlement
+
+-- | A vesting schedule anchored to a single trigger date (TGE,
+-- typically). Zero vested before `cliffDays` have elapsed since
+-- `triggerDate`, then linear from there up to fully vested at
+-- `vestingDays`. Both measured in days rather than months/years to
+-- avoid ambiguity (which day of the month, leap years, etc.) -- convert
+-- at the call site if a schedule is more naturally specified in months
+-- (e.g. a 6-month cliff / 24-month vest is roughly cliffDays = 182,
+-- vestingDays = 730).
+data VestingSchedule = VestingSchedule
+  with
+    triggerDate : Date
+    cliffDays   : Int
+    vestingDays : Int
+  deriving (Eq, Show)
+
+-- | Fraction of a holder's total allocation vested as of `asOf`: 0.0
+-- before the cliff, 1.0 once vestingDays have fully elapsed, linear in
+-- between. Pulled out as a plain function, same reasoning as
+-- calculateEntitlementLines in Entitlement.daml -- testable directly
+-- without a ledger submission.
+--
+-- NOTE for whoever runs `dpm build` first: intToDecimal is the function
+-- name I'm expecting for Int -> Decimal here. If the compiler doesn't
+-- recognize it, the newer name is likely `intToNumeric` instead --
+-- everything else about this function should still be right, that's
+-- the one spot with real uncertainty since I can't compile this myself.
+vestedFraction : VestingSchedule -> Date -> Decimal
+vestedFraction schedule asOf
+  | daysElapsed < schedule.cliffDays = 0.0
+  | daysElapsed >= schedule.vestingDays = 1.0
+  | otherwise = intToDecimal daysElapsed / intToDecimal schedule.vestingDays
+  where
+    daysElapsed = subDate asOf schedule.triggerDate
+
+-- | The static SAFT allocation table for one distribution -- fixed
+-- token amounts per holder (not ownership percentages, unlike
+-- HoldingsSnapshot's holdings), plus the vesting schedule governing how
+-- much of each allocation is actually releasable as of any given date.
+template AllocationTable
+  with
+    issuer      : Party
+    assetId     : Text        -- e.g. "OZM-SAFT-2026"
+    tokenSymbol : Text        -- e.g. "OZM" -- reused as EntitlementCalculation.currency below
+    allocations : [(Party, Decimal)]  -- (holder, total fixed token allocation)
+    schedule    : VestingSchedule
+  where
+    signatory issuer
+    observer [h | (h, _) <- allocations]
+
+    ensure all (\(_, amt) -> amt > 0.0) allocations
+
+    -- | Calculate (and turn into a settlement-ready EntitlementCalculation)
+    -- whatever's newly vested as of `asOfDate` that hasn't already been
+    -- released. `previouslyReleased` is the caller's record of what's
+    -- already gone out per holder -- there's no on-ledger way to sum
+    -- past SettlementInstructions from inside a choice, so this follows
+    -- the same pattern Attestation_Validate uses for
+    -- knownPriorEventCids: the fund's/issuer's own automation tracks
+    -- prior state and passes it in. Pass [] for the very first release.
+    -- nonconsuming -- deliberately, unlike DistributionDecision_CalculateEntitlement
+    -- (which is fine consuming a one-shot-per-period DistributionDecision).
+    -- AllocationTable represents the whole vesting schedule, exercised
+    -- once per release over months/years -- consuming it on the first
+    -- release would make every later release impossible, which is
+    -- exactly the bug the first test run caught.
+    nonconsuming choice AllocationTable_CalculateEntitlement : ContractId EntitlementCalculation
+      with
+        asOfDate           : Date
+        previouslyReleased : [(Party, Decimal)]
+        sourceRef          : Text
+      controller issuer
+      do
+        let lines = calculateVestedEntitlementLines this asOfDate previouslyReleased
+        create EntitlementCalculation with
+          fund = issuer
+          attestor = issuer
+          assetId
+          revenueType = TokenVesting
+          periodStart = asOfDate
+          periodEnd = asOfDate
+          currency = tokenSymbol
+          netDistributable = sumDecimals [l.amount | l <- lines]
+          lines
+          sourceRef
+          basis = FixedVesting
+
+-- | Same shape of math as calculateEntitlementLines (Entitlement.daml):
+-- for each holder, total allocation times vested fraction as of `asOf`,
+-- minus whatever's already been released to them, gives this release's
+-- entitlement line. A holder with nothing new to release (already fully
+-- paid out, or still pre-cliff) gets an amount of 0.0 rather than being
+-- dropped from the list -- keeps the line count matching the allocation
+-- table consistently across releases, which the dashboard/report side
+-- can rely on.
+calculateVestedEntitlementLines
+  : AllocationTable -> Date -> [(Party, Decimal)] -> [EntitlementLine]
+calculateVestedEntitlementLines table asOf previouslyReleased =
+  [ EntitlementLine with
+      holder
+      share = fraction
+      amount = max 0.0 (totalAllocation * fraction - alreadyReleased)
+  | (holder, totalAllocation) <- table.allocations
+  , let fraction = vestedFraction table.schedule asOf
+  , let alreadyReleased = sumDecimals [amt | (h, amt) <- previouslyReleased, h == holder]
+  ]

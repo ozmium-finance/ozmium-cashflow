@@ -1,0 +1,130 @@
+-- | Mission 2 — standalone Distribution Engine, fixed/vesting entitlement
+-- basis. Validates the new shape (Ozmium.Allocation) against a small SAFT-
+-- like scenario: two holders, a cliff, and multiple release dates,
+-- checking that the same shared EntitlementCalculation/EntitlementLine
+-- shape the waterfall case uses comes out the other end correctly.
+--
+-- Done when: vesting math is right before/during/after the cliff, and a
+-- second release only pays out the incremental newly-vested amount, not
+-- the whole thing again.
+module Checkpoint5_Allocation where
+
+import DA.Assert
+import DA.Date
+import Daml.Script
+import Ozmium.Allocation
+import Ozmium.Types
+import Ozmium.Setup
+
+-- | The pure vesting-fraction function on its own, no ledger involved --
+-- same reasoning as testing calculateEntitlementLines directly in
+-- Checkpoint3_Entitlement.daml. 180-day cliff, 730-day (2 year) total
+-- vest, matching a rough 6mo cliff / 24mo vest SAFT schedule.
+test_vestedFractionBeforeAtAndAfterCliff : Script ()
+test_vestedFractionBeforeAtAndAfterCliff = script do
+  let trigger = date 2026 Jan 1
+  let schedule = VestingSchedule with
+        triggerDate = trigger, cliffDays = 180, vestingDays = 730
+
+  -- Before the cliff: nothing vested yet.
+  vestedFraction schedule (addDays trigger 100) === 0.0
+
+  -- Exactly halfway through the vesting window: half vested.
+  vestedFraction schedule (addDays trigger 365) === 0.5
+
+  -- At or past the end of the vesting window: fully vested.
+  vestedFraction schedule (addDays trigger 730) === 1.0
+  vestedFraction schedule (addDays trigger 900) === 1.0
+
+test_allocationTableRejectsNonPositiveAllocation : Script ()
+test_allocationTableRejectsNonPositiveAllocation = script do
+  DemoParties{..} <- allocateDemoParties
+  issuer <- allocatePartyByHint (PartyIdHint "OzmiumIssuer")
+
+  submitMustFail issuer do
+    createCmd AllocationTable with
+      issuer
+      assetId = "OZM-SAFT-2026"
+      tokenSymbol = "OZM"
+      allocations = [(investor1, 10000.0), (investor2, 0.0)]
+      schedule = VestingSchedule with
+        triggerDate = date 2026 Jan 1, cliffDays = 180, vestingDays = 730
+
+-- | The scenario that matters most: a first release partway through
+-- vesting, then a second release later that only pays the incremental
+-- amount, not the whole vested balance again.
+test_secondReleaseOnlyPaysIncrementalAmount : Script ()
+test_secondReleaseOnlyPaysIncrementalAmount = script do
+  DemoParties{..} <- allocateDemoParties
+  issuer <- allocatePartyByHint (PartyIdHint "OzmiumIssuer")
+
+  let trigger = date 2026 Jan 1
+  let schedule = VestingSchedule with
+        triggerDate = trigger, cliffDays = 180, vestingDays = 730
+
+  allocationCid <- submit issuer do
+    createCmd AllocationTable with
+      issuer
+      assetId = "OZM-SAFT-2026"
+      tokenSymbol = "OZM"
+      allocations = [(investor1, 100000.0), (investor2, 50000.0)]
+      schedule
+
+  -- First release, at the halfway point: half of each holder's total
+  -- allocation, nothing released before now.
+  firstCid <- submit issuer do
+    exerciseCmd allocationCid AllocationTable_CalculateEntitlement with
+      asOfDate = addDays trigger 365
+      previouslyReleased = []
+      sourceRef = "ozm-saft-release-1"
+
+  Some firstEntitlement <- queryContractId issuer firstCid
+  firstEntitlement.basis === FixedVesting
+  firstEntitlement.revenueType === TokenVesting
+  firstEntitlement.lines ===
+    [ EntitlementLine with holder = investor1, share = 0.5, amount = 50000.0
+    , EntitlementLine with holder = investor2, share = 0.5, amount = 25000.0
+    ]
+  firstEntitlement.netDistributable === 75000.0
+
+  -- Second release, once fully vested -- previouslyReleased reflects
+  -- what the first release actually paid out, so this only carries the
+  -- remaining half, not the full allocation again.
+  secondCid <- submit issuer do
+    exerciseCmd allocationCid AllocationTable_CalculateEntitlement with
+      asOfDate = addDays trigger 900
+      previouslyReleased = [(investor1, 50000.0), (investor2, 25000.0)]
+      sourceRef = "ozm-saft-release-2"
+
+  Some secondEntitlement <- queryContractId issuer secondCid
+  secondEntitlement.lines ===
+    [ EntitlementLine with holder = investor1, share = 1.0, amount = 50000.0
+    , EntitlementLine with holder = investor2, share = 1.0, amount = 25000.0
+    ]
+
+-- | Before the cliff, a release should go out but pay everyone 0 --
+-- confirms the choice doesn't error or drop holders pre-cliff, it just
+-- correctly finds nothing new to release yet.
+test_releaseBeforeCliffPaysNothing : Script ()
+test_releaseBeforeCliffPaysNothing = script do
+  DemoParties{..} <- allocateDemoParties
+  issuer <- allocatePartyByHint (PartyIdHint "OzmiumIssuer")
+
+  let trigger = date 2026 Jan 1
+  allocationCid <- submit issuer do
+    createCmd AllocationTable with
+      issuer
+      assetId = "OZM-SAFT-2026"
+      tokenSymbol = "OZM"
+      allocations = [(investor1, 100000.0)]
+      schedule = VestingSchedule with
+        triggerDate = trigger, cliffDays = 180, vestingDays = 730
+
+  entitlementCid <- submit issuer do
+    exerciseCmd allocationCid AllocationTable_CalculateEntitlement with
+      asOfDate = addDays trigger 30
+      previouslyReleased = []
+      sourceRef = "ozm-saft-release-precliff"
+
+  Some entitlement <- queryContractId issuer entitlementCid
+  entitlement.lines === [ EntitlementLine with holder = investor1, share = 0.0, amount = 0.0 ]

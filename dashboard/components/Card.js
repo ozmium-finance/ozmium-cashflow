@@ -32,6 +32,18 @@ export default function Card({ stageKey, ev }) {
         ["Pass-through", money(a.passThroughAmount, a.currency)],
       ];
       break;
+    case "allocation": {
+      const allocations = Array.isArray(a.allocations) ? a.allocations : [];
+      const schedule = a.schedule || {};
+      fields = [
+        ["Asset", a.assetId],
+        ["Token", a.tokenSymbol],
+        ["Holders", String(allocations.length)],
+        ["Cliff / vest (days)", `${schedule.cliffDays ?? "—"} / ${schedule.vestingDays ?? "—"}`],
+        ["Issuer", partyLabel(a.issuer)],
+      ];
+      break;
+    }
     case "entitlement": {
       const lines = Array.isArray(a.lines) ? a.lines : [];
       fields = [
