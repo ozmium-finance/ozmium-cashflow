@@ -17,27 +17,73 @@ module Ozmium.Validation where
 import Ozmium.Types
 import Ozmium.Distribution
 
--- | Says who's allowed to attest for a given asset. One admin party
--- controls it for now — fine for a demo, but this is really the trust
--- root of the whole system, so a real deployment probably wants
--- multi-sig or a committee here rather than one key. That's flagged as
--- an open question in the Revenue Attestation Architecture doc too.
+-- | Whether the current authorizedAttestor is actually allowed to
+-- attest right now. Kept as a plain enum alongside a separate
+-- `expiresOn` field (rather than folding expiry into the constructor,
+-- e.g. `Licensed with expiresOn : Date`) so both fields serialize as
+-- plain JSON values -- a bare string, a bare date -- over the ledger
+-- API, matching how RevenueType/BasisKind already do this elsewhere in
+-- the codebase, instead of a nested variant payload.
+data AttestorLicenseState = Active | Revoked deriving (Eq, Show)
+
+-- | Says who's allowed to attest for a given asset, and until when.
+-- One admin party controls it for now — fine for a demo, but this is
+-- really the trust root of the whole system, so a real deployment
+-- probably wants multi-sig or a committee here rather than one key.
+-- That's flagged as an open question in the Revenue Attestation
+-- Architecture doc too.
+--
+-- Mission 2 addition: authorization used to be a one-time grant that
+-- lasted forever once given. Real attestor relationships expire
+-- (a property management contract ends) or need pulling immediately
+-- (an attestor is found misreporting) — `licenseState` covers the
+-- immediate-pull case, `expiresOn` covers the natural-lapse case.
+-- Attestation_Validate in Attestation.daml checks both.
 template AttestorRegistry
   with
     admin              : Party
     fund               : Party
     assetId            : Text
     authorizedAttestor : Party
+    licenseState       : AttestorLicenseState
+    expiresOn          : Date
   where
     signatory admin
     observer fund, authorizedAttestor
 
+    -- | Swap in a different attestor entirely -- resets to Active with
+    -- a fresh expiry, since this is a new licensing decision, not a
+    -- continuation of whatever state the previous attestor was in.
     choice AttestorRegistry_Replace : ContractId AttestorRegistry
       with
-        newAttestor : Party
+        newAttestor  : Party
+        newExpiresOn : Date
       controller admin
       do
-        create this with authorizedAttestor = newAttestor
+        create this with authorizedAttestor = newAttestor, licenseState = Active, expiresOn = newExpiresOn
+
+    -- | Pull the current attestor's authorization immediately,
+    -- independent of expiresOn -- e.g. they lost the underlying
+    -- property-management contract, or were found misreporting.
+    -- Attestation_Validate rejects any attestation from this attestor
+    -- from this point on, even if expiresOn hasn't been reached yet.
+    choice AttestorRegistry_Revoke : ContractId AttestorRegistry
+      controller admin
+      do
+        create this with licenseState = Revoked
+
+    -- | Extend (or explicitly shorten) how long the current attestor
+    -- stays licensed, without changing who the attestor is. Also lifts
+    -- a Revoked registry back to Active -- re-licensing the same
+    -- attestor after revoking them is a legitimate admin decision (the
+    -- issue that caused the revocation got resolved), and doesn't need
+    -- a separate choice from renewing an about-to-expire one.
+    choice AttestorRegistry_Renew : ContractId AttestorRegistry
+      with
+        newExpiresOn : Date
+      controller admin
+      do
+        create this with licenseState = Active, expiresOn = newExpiresOn
 
 -- | An attestation that made it through validation. This is the line
 -- between "someone said this happened" and "we now treat it as fact and

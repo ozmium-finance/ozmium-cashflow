@@ -1,0 +1,140 @@
+-- | Week 2 — attestor licensing/revocation. Extends AttestorRegistry
+-- (Ozmium.Validation) from a one-time grant that lasted forever once
+-- given, to a licensed/revoked/expiring relationship — a property
+-- manager's authorization to attest should be able to lapse or get
+-- pulled, not just exist or not exist.
+--
+-- Done when: a revoked attestor's attestation gets rejected even
+-- though they're still the registry's `authorizedAttestor`, renewing
+-- after a revoke lifts it back to Active, and an attestation for a
+-- period ending after the registry's expiresOn gets rejected too.
+module Checkpoint6_AttestorLicensing where
+
+import DA.Assert
+import DA.Date
+import Daml.Script
+import Ozmium.Attestation
+import Ozmium.Validation
+import Ozmium.Types
+import Ozmium.Setup
+
+mkAttestationFor : Party -> Party -> Date -> Date -> RevenueAttestation
+mkAttestationFor attestor fund periodStart periodEnd =
+  RevenueAttestation with
+    attestor
+    fund
+    assetId = "berlin-hauptstrasse-12"
+    revenueType = Rent
+    periodStart
+    periodEnd
+    grossAmount = 12500.00
+    currency = "EUR"
+    deductions = [Deduction with deductionType = "management_fee", amount = 500.00]
+    sourceRef = "checkpoint6-statement"
+
+-- A revoked attestor is still the registry's `authorizedAttestor` --
+-- revocation doesn't change who's on file, it changes whether they're
+-- currently allowed to act. Attestation_Validate has to check both.
+test_revokedAttestorRejected : Script ()
+test_revokedAttestorRejected = script do
+  DemoParties{..} <- allocateDemoParties
+  registryCid <- submit admin do
+    createCmd AttestorRegistry with
+      admin
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      authorizedAttestor = propManager
+      licenseState = Active
+      expiresOn = date 2030 Jan 1
+
+  revokedRegistryCid <- submit admin do
+    exerciseCmd registryCid AttestorRegistry_Revoke
+
+  attestationCid <- submit propManager do
+    createCmd (mkAttestationFor propManager berlinSpv (date 2026 Jul 1) (date 2026 Jul 31))
+
+  submitMustFail berlinSpv do
+    exerciseCmd attestationCid Attestation_Validate with
+      registryCid = revokedRegistryCid
+      knownPriorEventCids = []
+
+-- Renewing a revoked registry lifts it back to Active -- the same
+-- attestor, now re-licensed, should validate again with no extra step.
+test_renewedAfterRevokeSucceeds : Script ()
+test_renewedAfterRevokeSucceeds = script do
+  DemoParties{..} <- allocateDemoParties
+  registryCid <- submit admin do
+    createCmd AttestorRegistry with
+      admin
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      authorizedAttestor = propManager
+      licenseState = Active
+      expiresOn = date 2030 Jan 1
+
+  revokedRegistryCid <- submit admin do
+    exerciseCmd registryCid AttestorRegistry_Revoke
+
+  renewedRegistryCid <- submit admin do
+    exerciseCmd revokedRegistryCid AttestorRegistry_Renew with
+      newExpiresOn = date 2031 Jan 1
+
+  attestationCid <- submit propManager do
+    createCmd (mkAttestationFor propManager berlinSpv (date 2026 Jul 1) (date 2026 Jul 31))
+
+  validatedCid <- submit berlinSpv do
+    exerciseCmd attestationCid Attestation_Validate with
+      registryCid = renewedRegistryCid
+      knownPriorEventCids = []
+
+  Some validated <- queryContractId berlinSpv validatedCid
+  validated.netDistributable === 12000.00  -- 12500 - 500
+
+-- A period ending after the registry's expiresOn gets rejected, even
+-- though licenseState is still Active -- expiry is a separate, natural
+-- lapse, not something that needs an explicit Revoke to take effect.
+test_expiredLicenseRejected : Script ()
+test_expiredLicenseRejected = script do
+  DemoParties{..} <- allocateDemoParties
+  registryCid <- submit admin do
+    createCmd AttestorRegistry with
+      admin
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      authorizedAttestor = propManager
+      licenseState = Active
+      expiresOn = date 2026 Jun 30  -- expires the day before the attested period starts
+
+  attestationCid <- submit propManager do
+    createCmd (mkAttestationFor propManager berlinSpv (date 2026 Jul 1) (date 2026 Jul 31))
+
+  submitMustFail berlinSpv do
+    exerciseCmd attestationCid Attestation_Validate with
+      registryCid
+      knownPriorEventCids = []
+
+-- Flip side of the expiry test: a period ending exactly on expiresOn
+-- (not after it) still validates -- expiresOn is inclusive, matching
+-- how "licensed through Jan 1" reads in plain English.
+test_licenseValidThroughExpiryDateInclusive : Script ()
+test_licenseValidThroughExpiryDateInclusive = script do
+  DemoParties{..} <- allocateDemoParties
+  registryCid <- submit admin do
+    createCmd AttestorRegistry with
+      admin
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      authorizedAttestor = propManager
+      licenseState = Active
+      expiresOn = date 2026 Jul 31  -- expires exactly on the last day of the attested period
+
+  attestationCid <- submit propManager do
+    createCmd (mkAttestationFor propManager berlinSpv (date 2026 Jul 1) (date 2026 Jul 31))
+
+  validatedCid <- submit berlinSpv do
+    exerciseCmd attestationCid Attestation_Validate with
+      registryCid
+      knownPriorEventCids = []
+
+  Some validated <- queryContractId berlinSpv validatedCid
+  validated.netDistributable === 12000.00

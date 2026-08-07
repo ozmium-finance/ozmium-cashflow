@@ -21,6 +21,7 @@
 -- (Attestation_Validate's registryCid, etc).
 module Ozmium.Setup where
 
+import DA.Date
 import Daml.Script
 import Ozmium.Validation
 import Ozmium.Entitlement
@@ -55,6 +56,8 @@ setup = do
       fund = berlinSpv
       assetId = "berlin-hauptstrasse-12"
       authorizedAttestor = propManager
+      licenseState = Active
+      expiresOn = date 2030 Jan 1  -- comfortably past every demo/test date in this repo
 
   -- 50/30/20 split across the three investors.
   holdingsCid <- submit berlinSpv do

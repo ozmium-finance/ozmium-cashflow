@@ -95,7 +95,15 @@ export default function DemoPanel() {
       await submitCommand(admin, [{
         CreateCommand: {
           templateId: `${PKG}:Ozmium.Validation:AttestorRegistry`,
-          createArguments: { admin, fund: berlinSpv, assetId: "berlin-hauptstrasse-12", authorizedAttestor: propManager },
+          createArguments: {
+            admin, fund: berlinSpv, assetId: "berlin-hauptstrasse-12", authorizedAttestor: propManager,
+            // Licensed with a far-future expiry by default -- the point
+            // of the attestor-licensing work is the Revoke/Renew choices
+            // existing and being enforced by Attestation_Validate, not
+            // making the demo's own attestor expire mid-click-through.
+            licenseState: "Active",
+            expiresOn: "2030-01-01",
+          },
         },
       }]);
       const [registry] = await findNewContracts(SETUP_TEMPLATES.registry, knownRegistry);
@@ -311,6 +319,144 @@ export default function DemoPanel() {
     log(`${ordinal} settlement marked Paid`);
   }
 
+  // Attestor licensing demo: same registry/attestor Setup already
+  // creates, walked through Active -> works -> Revoked -> rejected ->
+  // Renewed -> works again. registryCid is genuinely global/shared
+  // state (every scenario's validate step reads demo.registryCid), so
+  // revoke/renew below update it at the top level via setSetupField,
+  // not just this run -- Revoke/Renew are consuming choices, so the
+  // registry's contract id changes every time either fires, and every
+  // other scenario needs to keep seeing the current one.
+  async function stepAttestFirst() {
+    const { propManager, berlinSpv } = demo.parties;
+    const scenarioKey = demo.scenarioValue;
+    const s = SCENARIOS[scenarioKey];
+    const period = s.periods[0];
+
+    const known = await knownCidsFor("Ozmium.Attestation:RevenueAttestation");
+    await submitCommand(propManager, [{
+      CreateCommand: {
+        templateId: `${PKG}:Ozmium.Attestation:RevenueAttestation`,
+        createArguments: {
+          attestor: propManager, fund: berlinSpv, assetId: "berlin-hauptstrasse-12",
+          revenueType: s.revenueType, periodStart: period.periodStart, periodEnd: period.periodEnd,
+          grossAmount: period.grossAmount, currency: period.currency,
+          deductions: period.deductions,
+          sourceRef: `dashboard-demo-${scenarioKey}-first-${Date.now()}`,
+        },
+      },
+    }]);
+    const [created] = await findNewContracts("Ozmium.Attestation:RevenueAttestation", known);
+    dispatch(setRunField({ scenario: scenarioKey, fields: { firstAttestationCid: created?.contractId, activeScenario: s } }));
+    log(`First attestation created — ${period.periodStart} → ${period.periodEnd} — PropManagerCo is currently licensed`);
+  }
+
+  async function stepValidateFirst() {
+    const { berlinSpv } = demo.parties;
+    await submitCommand(berlinSpv, [{
+      ExerciseCommand: {
+        templateId: `${PKG}:Ozmium.Attestation:RevenueAttestation`,
+        contractId: run.firstAttestationCid,
+        choice: "Attestation_Validate",
+        choiceArgument: { registryCid: demo.registryCid, knownPriorEventCids: [] },
+      },
+    }]);
+    log("Validated — PropManagerCo's license is Active, attestation accepted normally");
+  }
+
+  async function stepRevoke() {
+    const { admin } = demo.parties;
+    const known = await knownCidsFor("Ozmium.Validation:AttestorRegistry");
+    await submitCommand(admin, [{
+      ExerciseCommand: {
+        templateId: `${PKG}:Ozmium.Validation:AttestorRegistry`,
+        contractId: demo.registryCid,
+        choice: "AttestorRegistry_Revoke",
+        choiceArgument: {},
+      },
+    }]);
+    const [created] = await findNewContracts("Ozmium.Validation:AttestorRegistry", known);
+    dispatch(setSetupField({ registryCid: created?.contractId }));
+    log("PropManagerCo's license revoked — any attestation validated from now on will be rejected");
+  }
+
+  async function stepAttestSecond() {
+    const { propManager, berlinSpv } = demo.parties;
+    const scenarioKey = demo.scenarioValue;
+    const s = run.activeScenario;
+    const period = s.periods[1];
+
+    const known = await knownCidsFor("Ozmium.Attestation:RevenueAttestation");
+    await submitCommand(propManager, [{
+      CreateCommand: {
+        templateId: `${PKG}:Ozmium.Attestation:RevenueAttestation`,
+        createArguments: {
+          attestor: propManager, fund: berlinSpv, assetId: "berlin-hauptstrasse-12",
+          revenueType: s.revenueType, periodStart: period.periodStart, periodEnd: period.periodEnd,
+          grossAmount: period.grossAmount, currency: period.currency,
+          deductions: period.deductions,
+          sourceRef: `dashboard-demo-${scenarioKey}-second-${Date.now()}`,
+        },
+      },
+    }]);
+    const [created] = await findNewContracts("Ozmium.Attestation:RevenueAttestation", known);
+    dispatch(setRunField({ scenario: scenarioKey, fields: { secondAttestationCid: created?.contractId } }));
+    log(`Second attestation created — ${period.periodStart} → ${period.periodEnd} — same attestor, now revoked`);
+  }
+
+  // The interesting outcome here is the rejection itself -- so unlike
+  // every other step, a thrown error from the ledger is the expected,
+  // "this worked correctly" path. If the exercise instead succeeds,
+  // that's the real bug (a revoked attestor got through), so this
+  // throws in that case to surface it as a failure the normal way.
+  async function stepValidateRejected() {
+    const { berlinSpv } = demo.parties;
+    try {
+      await submitCommand(berlinSpv, [{
+        ExerciseCommand: {
+          templateId: `${PKG}:Ozmium.Attestation:RevenueAttestation`,
+          contractId: run.secondAttestationCid,
+          choice: "Attestation_Validate",
+          choiceArgument: { registryCid: demo.registryCid, knownPriorEventCids: [] },
+        },
+      }]);
+    } catch (err) {
+      log("Validation correctly rejected — PropManagerCo's license is currently Revoked");
+      return;
+    }
+    throw new Error("Validation unexpectedly succeeded — a revoked attestor should have been rejected");
+  }
+
+  async function stepRenew() {
+    const { admin } = demo.parties;
+    const s = run.activeScenario;
+    const known = await knownCidsFor("Ozmium.Validation:AttestorRegistry");
+    await submitCommand(admin, [{
+      ExerciseCommand: {
+        templateId: `${PKG}:Ozmium.Validation:AttestorRegistry`,
+        contractId: demo.registryCid,
+        choice: "AttestorRegistry_Renew",
+        choiceArgument: { newExpiresOn: s.renewedExpiresOn },
+      },
+    }]);
+    const [created] = await findNewContracts("Ozmium.Validation:AttestorRegistry", known);
+    dispatch(setSetupField({ registryCid: created?.contractId }));
+    log(`PropManagerCo re-licensed through ${s.renewedExpiresOn} — back to Active`);
+  }
+
+  async function stepValidateRenewed() {
+    const { berlinSpv } = demo.parties;
+    await submitCommand(berlinSpv, [{
+      ExerciseCommand: {
+        templateId: `${PKG}:Ozmium.Attestation:RevenueAttestation`,
+        contractId: run.secondAttestationCid,
+        choice: "Attestation_Validate",
+        choiceArgument: { registryCid: demo.registryCid, knownPriorEventCids: [] },
+      },
+    }]);
+    log("Validated — PropManagerCo is Active again after renewal, second attestation now accepted");
+  }
+
   const STEP_FN = {
     setup: stepSetup,
     attest: stepAttest,
@@ -323,6 +469,13 @@ export default function DemoPanel() {
     markPaid: () => markNextSettlementPaid("First"),
     markPaid2: () => markNextSettlementPaid("Second"),
     markPaid3: () => markNextSettlementPaid("Third"),
+    attestFirst: stepAttestFirst,
+    validateFirst: stepValidateFirst,
+    revoke: stepRevoke,
+    attestSecond: stepAttestSecond,
+    validateRejected: stepValidateRejected,
+    renew: stepRenew,
+    validateRenewed: stepValidateRenewed,
   };
 
   return (

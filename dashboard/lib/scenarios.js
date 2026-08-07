@@ -60,4 +60,28 @@ export const SCENARIOS = {
     triggerDate: "2026-01-01", cliffDays: 180, vestingDays: 730,
     asOfDate: "2027-01-01",
   },
+  attestorLicensing: {
+    kind: "licensing",
+    label: "Attestor licensing — revoke & renew (PropManagerCo)",
+    // Same asset/attestor Setup already wires up (berlin-hauptstrasse-12
+    // / PropManagerCo), just enough revenue data for two monthly
+    // periods -- this scenario is demonstrating Ozmium.Validation's
+    // trust-layer mechanism, not the money math, so it deliberately
+    // stops at Validate rather than going on to
+    // distribution/entitlement/settlement.
+    revenueType: "Rent",
+    periods: [
+      {
+        periodStart: "2026-08-01", periodEnd: "2026-08-31",
+        grossAmount: "10000.00", currency: "EUR",
+        deductions: [{ deductionType: "management fee", amount: "400.00" }],
+      },
+      {
+        periodStart: "2026-09-01", periodEnd: "2026-09-30",
+        grossAmount: "10500.00", currency: "EUR",
+        deductions: [{ deductionType: "management fee", amount: "420.00" }],
+      },
+    ],
+    renewedExpiresOn: "2031-01-01",
+  },
 };

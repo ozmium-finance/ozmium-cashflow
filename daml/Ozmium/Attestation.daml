@@ -77,6 +77,12 @@ template RevenueAttestation
         assertMsg
           ("Attestor " <> show attestor <> " is not the registered attestor for asset " <> assetId)
           (registry.authorizedAttestor == attestor)
+        assertMsg
+          ("Attestor " <> show attestor <> " is not currently licensed for asset " <> assetId <> " (registry status: Revoked)")
+          (registry.licenseState == Active)
+        assertMsg
+          ("Attestor " <> show attestor <> "'s license for asset " <> assetId <> " expired on " <> show registry.expiresOn <> ", before this period ended on " <> show periodEnd)
+          (periodEnd <= registry.expiresOn)
 
         forA_ knownPriorEventCids $ \priorCid -> do
           priorEvent <- fetch priorCid

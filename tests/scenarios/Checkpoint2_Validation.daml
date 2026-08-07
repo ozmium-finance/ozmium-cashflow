@@ -28,6 +28,8 @@ setupRegistry DemoParties{..} =
       fund = berlinSpv
       assetId = "berlin-hauptstrasse-12"
       authorizedAttestor = propManager
+      licenseState = Active
+      expiresOn = date 2030 Jan 1
 
 mkAttestationCmd : Party -> Party -> Text -> Date -> Date -> Decimal -> Text -> RevenueAttestation
 mkAttestationCmd attestor fund assetId periodStart periodEnd grossAmount sourceRef =

@@ -27,6 +27,13 @@ function emptyRun() {
     // differs by scenario kind.
     entitlementFund: null,
     settlementCids: null,
+    // Only used by the attestor-licensing scenario -- two separate
+    // RevenueAttestations (before and after the revoke/renew cycle),
+    // kept as distinct fields since both are alive across several
+    // steps at once (unlike the waterfall/vesting chains, which only
+    // ever have one attestation-shaped contract in flight).
+    firstAttestationCid: null,
+    secondAttestationCid: null,
     // Locked in at the moment step 2 runs, so this run's later steps
     // keep using the scenario data as it was when the run started, even
     // if SCENARIOS itself is inspected again later.
@@ -37,6 +44,9 @@ function emptyRun() {
       setup: false, attest: false, validate: false, distribute: false,
       entitlement: false, allocate: false, release: false,
       settle: false, markPaid: false, markPaid2: false, markPaid3: false,
+      attestFirst: false, validateFirst: false, revoke: false,
+      attestSecond: false, validateRejected: false, renew: false,
+      validateRenewed: false,
     },
   };
 }

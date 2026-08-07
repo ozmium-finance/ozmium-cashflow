@@ -51,7 +51,9 @@ runFullDemo = do
       fund = berlinSpv
       assetId = "berlin-hauptstrasse-12"
       authorizedAttestor = propManager
-  debug ("AttestorRegistry created -- PropManagerCo is the registered attestor for berlin-hauptstrasse-12. Id: " <> show registryCid)
+      licenseState = Active
+      expiresOn = date 2030 Jan 1
+  debug ("AttestorRegistry created -- PropManagerCo is the registered attestor for berlin-hauptstrasse-12, licensed through 2030-01-01. Id: " <> show registryCid)
 
   holdingsCid <- submit berlinSpv do
     createCmd HoldingsSnapshot with

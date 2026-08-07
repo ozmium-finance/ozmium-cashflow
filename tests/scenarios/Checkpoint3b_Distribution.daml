@@ -32,6 +32,8 @@ test_spvRetainsReserveBeforeDistribution = script do
       fund = berlinSpv
       assetId = "berlin-hauptstrasse-12"
       authorizedAttestor = propManager
+      licenseState = Active
+      expiresOn = date 2030 Jan 1
 
   holdingsCid <- submit berlinSpv do
     createCmd HoldingsSnapshot with
@@ -98,6 +100,8 @@ test_retentionCannotExceedNetOperatingIncome = script do
       fund = berlinSpv
       assetId = "berlin-hauptstrasse-12"
       authorizedAttestor = propManager
+      licenseState = Active
+      expiresOn = date 2030 Jan 1
 
   attestationCid <- submit propManager do
     createCmd RevenueAttestation with
@@ -133,6 +137,8 @@ test_retentionCannotBeNegative = script do
       fund = berlinSpv
       assetId = "berlin-hauptstrasse-12"
       authorizedAttestor = propManager
+      licenseState = Active
+      expiresOn = date 2030 Jan 1
 
   attestationCid <- submit propManager do
     createCmd RevenueAttestation with

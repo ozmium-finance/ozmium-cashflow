@@ -23,6 +23,8 @@ test_entitlementSplitsProRataAcrossThreeHolders = script do
       fund = berlinSpv
       assetId = "berlin-hauptstrasse-12"
       authorizedAttestor = propManager
+      licenseState = Active
+      expiresOn = date 2030 Jan 1
 
   holdingsCid <- submit berlinSpv do
     createCmd HoldingsSnapshot with
@@ -77,6 +79,8 @@ test_entitlementSplitsAcrossTwoHolders = script do
       fund = berlinSpv
       assetId = "berlin-hauptstrasse-12"
       authorizedAttestor = propManager
+      licenseState = Active
+      expiresOn = date 2030 Jan 1
 
   holdingsCid <- submit berlinSpv do
     createCmd HoldingsSnapshot with
