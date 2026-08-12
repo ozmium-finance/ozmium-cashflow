@@ -1,0 +1,98 @@
+-- | Week 3 — rolling Paid settlements up into a finalized, on-ledger
+-- distribution report. Draft/Finalize is two steps so Finalize has
+-- somewhere to fetch and check each settlement's actual status itself,
+-- rather than trusting whatever total the caller claims -- see
+-- Ozmium.Reporting.
+--
+-- Done when: Finalize correctly sums every Paid settlement into the
+-- report's total and entry list, and rejects outright if any pointed-at
+-- settlement is still Pending.
+module Checkpoint8_DistributionReport where
+
+import DA.Assert
+import DA.Date
+import Daml.Script
+import Ozmium.Settlement
+import Ozmium.Reporting
+import Ozmium.Setup
+
+test_finalizeSumsAllPaidSettlements : Script ()
+test_finalizeSumsAllPaidSettlements = script do
+  DemoParties{..} <- allocateDemoParties
+
+  settlement1Pending <- submit berlinSpv do
+    createCmd SettlementInstruction with
+      fund = berlinSpv
+      holder = investor1
+      assetId = "berlin-hauptstrasse-12"
+      periodStart = date 2026 Jul 1
+      periodEnd = date 2026 Jul 31
+      currency = "EUR"
+      amount = 6000.00
+      sourceEventRef = "checkpoint8-statement-1"
+      status = Pending
+
+  settlement1Paid <- submit berlinSpv do
+    exerciseCmd settlement1Pending Settlement_MarkPaid
+
+  settlement2Pending <- submit berlinSpv do
+    createCmd SettlementInstruction with
+      fund = berlinSpv
+      holder = investor2
+      assetId = "berlin-hauptstrasse-12"
+      periodStart = date 2026 Jul 1
+      periodEnd = date 2026 Jul 31
+      currency = "EUR"
+      amount = 3600.00
+      sourceEventRef = "checkpoint8-statement-2"
+      status = Pending
+
+  settlement2Paid <- submit berlinSpv do
+    exerciseCmd settlement2Pending Settlement_MarkPaid
+
+  draftCid <- submit berlinSpv do
+    createCmd DistributionReportDraft with
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      periodStart = date 2026 Jul 1
+      periodEnd = date 2026 Jul 31
+
+  reportCid <- submit berlinSpv do
+    exerciseCmd draftCid DistributionReportDraft_Finalize with
+      settlementCids = [settlement1Paid, settlement2Paid]
+      generatedOn = date 2026 Aug 1
+
+  Some report <- queryContractId berlinSpv reportCid
+  report.totalDistributed === 9600.00
+  length report.entries === 2
+
+-- A still-Pending settlement can't be rolled into a report -- Finalize
+-- checks each settlement's actual status itself, it doesn't trust
+-- whatever the caller claims.
+test_finalizeRejectsUnpaidSettlement : Script ()
+test_finalizeRejectsUnpaidSettlement = script do
+  DemoParties{..} <- allocateDemoParties
+
+  stillPendingCid <- submit berlinSpv do
+    createCmd SettlementInstruction with
+      fund = berlinSpv
+      holder = investor1
+      assetId = "berlin-hauptstrasse-12"
+      periodStart = date 2026 Jul 1
+      periodEnd = date 2026 Jul 31
+      currency = "EUR"
+      amount = 6000.00
+      sourceEventRef = "checkpoint8-statement-unpaid"
+      status = Pending
+
+  draftCid <- submit berlinSpv do
+    createCmd DistributionReportDraft with
+      fund = berlinSpv
+      assetId = "berlin-hauptstrasse-12"
+      periodStart = date 2026 Jul 1
+      periodEnd = date 2026 Jul 31
+
+  submitMustFail berlinSpv do
+    exerciseCmd draftCid DistributionReportDraft_Finalize with
+      settlementCids = [stillPendingCid]
+      generatedOn = date 2026 Aug 1

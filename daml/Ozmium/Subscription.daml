@@ -1,0 +1,83 @@
+-- | Week 3 — subscription requests, gated on an Approved
+-- InvestorCredential at Accept time (not at Request time) so the
+-- interesting case -- an investor who looks identical on paper but
+-- isn't actually cleared -- is caught where it matters: the moment the
+-- issuer tries to accept money from them, not earlier where it'd be
+-- invisible in the demo. See Ozmium.Investor for the credential this
+-- checks against.
+--
+-- Prefixed status constructors (SubscriptionRequested/Accepted/Rejected,
+-- not the bare Requested/Approved/Rejected a first draft would reach
+-- for) for the same reason as everywhere else in this codebase --
+-- unqualified imports mean bare Approved/Rejected would collide with
+-- InvestorCredentialStatus's constructors the moment a file needs both
+-- in scope (Checkpoint7 does).
+module Ozmium.Subscription where
+
+import Ozmium.Investor
+
+data SubscriptionStatus
+  = SubscriptionRequested
+  | SubscriptionAccepted
+  | SubscriptionRejected
+  deriving (Eq, Show)
+
+-- | The investor's own request to subscribe for `requestedAmount` of
+-- `assetId` -- signed by the investor, same propose/decide shape as
+-- InvestorOnboardingRequest. issuer has to be an observer (not just a
+-- choice argument) for the same reason admin does on
+-- InvestorOnboardingRequest: Daml's privacy model requires an actual
+-- stakeholder to exercise a choice at all.
+template SubscriptionRequest
+  with
+    investor        : Party
+    issuer          : Party
+    assetId         : Text
+    requestedAmount : Decimal
+    currency        : Text
+    submittedOn     : Date
+    status          : SubscriptionStatus
+    reviewNotes     : Text
+    lastUpdatedOn   : Date
+  where
+    signatory investor
+    observer issuer
+
+    ensure requestedAmount > 0.0
+
+    -- The actual compliance gate: fetches the InvestorCredential the
+    -- issuer points at and checks it's both Approved *and* actually
+    -- belongs to this investor/issuer pair, rather than trusting the
+    -- caller's word for either. A rejected investor's request looks
+    -- identical to an approved one on its face -- this is where that
+    -- stops mattering.
+    choice SubscriptionRequest_Accept : ContractId SubscriptionRequest
+      with
+        credentialCid : ContractId InvestorCredential
+        effectiveOn   : Date
+      controller issuer
+      do
+        credential <- fetch credentialCid
+        assertMsg "Credential does not belong to this investor" (credential.investor == investor)
+        assertMsg "Credential does not belong to this issuer" (credential.fund == issuer)
+        assertMsg
+          ("Investor's credential is not Approved (status: " <> show credential.status <> ")")
+          (credential.status == InvestorApproved)
+        create this with
+          status = SubscriptionAccepted
+          lastUpdatedOn = effectiveOn
+
+    -- Explicit rejection path, mirroring InvestorOnboardingRequest's
+    -- Approve/Reject pair -- issuer can turn a request away directly
+    -- (bad fit, oversubscribed round, whatever) without needing a
+    -- failed credential check to do it.
+    choice SubscriptionRequest_Reject : ContractId SubscriptionRequest
+      with
+        effectiveOn : Date
+        notes       : Text
+      controller issuer
+      do
+        create this with
+          status = SubscriptionRejected
+          reviewNotes = notes
+          lastUpdatedOn = effectiveOn

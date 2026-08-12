@@ -1,0 +1,129 @@
+-- | Week 3 — investor onboarding + subscription gating. Two investors
+-- run through the same self-onboarding flow with opposite outcomes:
+-- Alice gets Approved and her subscription goes through cleanly; Bob
+-- gets Rejected and his subscription -- which looks exactly as valid as
+-- Alice's on its face -- gets turned away at Accept anyway. See
+-- Ozmium.Investor and Ozmium.Subscription for why the gate lives at
+-- Accept time, not Request time.
+--
+-- Done when: an Approved investor's subscription accepts normally, a
+-- Rejected investor's subscription is turned away at Accept even though
+-- the request itself looked identical, and the explicit Reject choice
+-- on SubscriptionRequest works independent of the credential check.
+module Checkpoint7_InvestorOnboarding where
+
+import DA.Assert
+import DA.Date
+import Daml.Script
+import Ozmium.Investor
+import Ozmium.Subscription
+import Ozmium.Setup
+
+test_approvedInvestorCanSubscribeAndAccept : Script ()
+test_approvedInvestorCanSubscribeAndAccept = script do
+  DemoParties{..} <- allocateDemoParties
+
+  requestCid <- submit investor1 do
+    createCmd InvestorOnboardingRequest with
+      investor = investor1
+      fund = berlinSpv
+      admin
+      submittedOn = date 2026 Aug 1
+      applicationNotes = ""
+
+  credentialCid <- submit admin do
+    exerciseCmd requestCid InvestorOnboardingRequest_Approve with
+      effectiveOn = date 2026 Aug 2
+      notes = "KYC cleared"
+
+  Some credential <- queryContractId admin credentialCid
+  credential.status === InvestorApproved
+
+  subCid <- submit investor1 do
+    createCmd SubscriptionRequest with
+      investor = investor1
+      issuer = berlinSpv
+      assetId = "OZM-SAFT-2026"
+      requestedAmount = 25000.00
+      currency = "OZM"
+      submittedOn = date 2026 Aug 3
+      status = SubscriptionRequested
+      reviewNotes = ""
+      lastUpdatedOn = date 2026 Aug 3
+
+  acceptedCid <- submit berlinSpv do
+    exerciseCmd subCid SubscriptionRequest_Accept with
+      credentialCid
+      effectiveOn = date 2026 Aug 4
+
+  Some accepted <- queryContractId berlinSpv acceptedCid
+  accepted.status === SubscriptionAccepted
+
+-- The interesting case: Bob's request is indistinguishable from
+-- Alice's on its face (same shape, same issuer, a plausible amount) --
+-- only the credential check at Accept catches that he was never
+-- actually cleared.
+test_rejectedInvestorCannotSubscribe : Script ()
+test_rejectedInvestorCannotSubscribe = script do
+  DemoParties{..} <- allocateDemoParties
+
+  requestCid <- submit investor2 do
+    createCmd InvestorOnboardingRequest with
+      investor = investor2
+      fund = berlinSpv
+      admin
+      submittedOn = date 2026 Aug 1
+      applicationNotes = ""
+
+  credentialCid <- submit admin do
+    exerciseCmd requestCid InvestorOnboardingRequest_Reject with
+      effectiveOn = date 2026 Aug 2
+      notes = "Failed sanctions screening"
+
+  Some credential <- queryContractId admin credentialCid
+  credential.status === InvestorRejected
+
+  subCid <- submit investor2 do
+    createCmd SubscriptionRequest with
+      investor = investor2
+      issuer = berlinSpv
+      assetId = "OZM-SAFT-2026"
+      requestedAmount = 10000.00
+      currency = "OZM"
+      submittedOn = date 2026 Aug 3
+      status = SubscriptionRequested
+      reviewNotes = ""
+      lastUpdatedOn = date 2026 Aug 3
+
+  submitMustFail berlinSpv do
+    exerciseCmd subCid SubscriptionRequest_Accept with
+      credentialCid
+      effectiveOn = date 2026 Aug 4
+
+-- SubscriptionRequest_Reject works independent of any credential check
+-- -- the issuer can turn a request away directly (oversubscribed round,
+-- bad fit, whatever) without needing the investor to actually be
+-- non-Approved.
+test_explicitRejectChoiceWorks : Script ()
+test_explicitRejectChoiceWorks = script do
+  DemoParties{..} <- allocateDemoParties
+
+  subCid <- submit investor3 do
+    createCmd SubscriptionRequest with
+      investor = investor3
+      issuer = berlinSpv
+      assetId = "OZM-SAFT-2026"
+      requestedAmount = 5000.00
+      currency = "OZM"
+      submittedOn = date 2026 Aug 3
+      status = SubscriptionRequested
+      reviewNotes = ""
+      lastUpdatedOn = date 2026 Aug 3
+
+  rejectedCid <- submit berlinSpv do
+    exerciseCmd subCid SubscriptionRequest_Reject with
+      effectiveOn = date 2026 Aug 4
+      notes = "Round oversubscribed"
+
+  Some rejected <- queryContractId berlinSpv rejectedCid
+  rejected.status === SubscriptionRejected

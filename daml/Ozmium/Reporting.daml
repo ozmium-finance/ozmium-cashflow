@@ -1,0 +1,80 @@
+-- | Week 3 — rolling a run's settlements up into an on-ledger
+-- distribution report for investors/auditors. Draft/Finalize is two
+-- steps on the ledger, not one, so Finalize has somewhere to fetch and
+-- check each settlement's actual status itself rather than trusting
+-- whatever total the caller claims -- the whole point of splitting it
+-- this way instead of just asserting a report onto the ledger directly.
+module Ozmium.Reporting where
+
+import Ozmium.Types
+import Ozmium.Settlement
+
+-- | One line of a finalized report -- who got paid, how much, and
+-- traced back to the settlement obligation that produced it.
+data DistributionEntry = DistributionEntry
+  with
+    holder         : Party
+    amount         : Decimal
+    currency       : Text
+    sourceEventRef : Text
+  deriving (Eq, Show)
+
+-- | Open while the fund is still gathering which settlements belong to
+-- this period's report -- exists so Finalize has a concrete contract to
+-- act on, same reasoning as every other propose/decide split in this
+-- codebase.
+template DistributionReportDraft
+  with
+    fund        : Party
+    assetId     : Text
+    periodStart : Date
+    periodEnd   : Date
+  where
+    signatory fund
+
+    -- Fetches every settlement the caller points at and checks each one
+    -- is actually Paid before rolling it into the report -- a report
+    -- can't just be typed up client-side and asserted onto the ledger.
+    choice DistributionReportDraft_Finalize : ContractId DistributionReport
+      with
+        settlementCids : [ContractId SettlementInstruction]
+        generatedOn    : Date
+      controller fund
+      do
+        settlements <- forA settlementCids fetch
+        _ <- forA settlements $ \s ->
+          assertMsg
+            ("Settlement for " <> s.sourceEventRef <> " is not Paid (status: " <> show s.status <> ")")
+            (s.status == Paid)
+        let entries =
+              [ DistributionEntry with
+                  holder = s.holder
+                  amount = s.amount
+                  currency = s.currency
+                  sourceEventRef = s.sourceEventRef
+              | s <- settlements
+              ]
+        create DistributionReport with
+          fund
+          assetId
+          periodStart
+          periodEnd
+          totalDistributed = sumDecimals [e.amount | e <- entries]
+          entries
+          generatedOn
+
+-- | The finalized, on-ledger report -- every Paid settlement for this
+-- period rolled up into one auditable fact, cross-signed by the fund
+-- the same as everything else in this codebase.
+template DistributionReport
+  with
+    fund             : Party
+    assetId          : Text
+    periodStart      : Date
+    periodEnd        : Date
+    totalDistributed : Decimal
+    entries          : [DistributionEntry]
+    generatedOn      : Date
+  where
+    signatory fund
+    observer [e.holder | e <- entries]
