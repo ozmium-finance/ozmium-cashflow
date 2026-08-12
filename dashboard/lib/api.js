@@ -185,12 +185,37 @@ async function searchForParty(hint, maxPages = 100) {
   return null;
 }
 
+// Canton has no wildcard CanActAs (unlike CanReadAsAnyParty) -- per
+// Five North, it's granted per party, and has to happen after the party
+// exists (via /v2/users/{userId}/rights, self-granted since this app's
+// devnet identity has ParticipantAdmin -- see pages/api/grant-act-as.js).
+// Every party this app will ever submitCommand as has to go through
+// this once. A no-op outside devnet mode (grant-act-as.js just skips).
+async function grantActAs(party) {
+  const res = await fetch("/api/grant-act-as", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ party }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`grant-act-as -> HTTP ${res.status}\n${text}`);
+  }
+}
+
 // Mirrors MockAttestor.daml's getOrAllocateParty -- reuse an existing
 // party for this hint if we've already resolved one (checked locally
 // first, no network round trip), otherwise allocate fresh. A "party
 // already exists" reply on create only happens for hints from earlier
 // testing sessions predating this cache -- handled by one bounded
 // search for just that hint, not a full pre-scan on every call.
+//
+// Every path that resolves a *new-to-this-cache* party id also grants
+// it CanActAs before returning -- allocating (or discovering) a party
+// isn't enough to submit commands as it. Once a hint is cached, the
+// grant has already happened at some earlier point and doesn't need
+// repeating (rights are permanent participant-side state, not tied to
+// this browser).
 export async function getOrAllocateParty(hint) {
   const cached = loadPartyCache()[hint];
   if (cached) return cached;
@@ -198,12 +223,14 @@ export async function getOrAllocateParty(hint) {
   try {
     const created = await apiFetch("/v2/parties", { partyIdHint: hint });
     const party = created.partyDetails.party;
+    await grantActAs(party);
     cacheParty(hint, party);
     return party;
   } catch (err) {
     if (!/already exists/i.test(err.message)) throw err;
     const found = await searchForParty(hint);
     if (found) {
+      await grantActAs(found);
       cacheParty(hint, found);
       return found;
     }
