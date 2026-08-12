@@ -35,6 +35,50 @@ jobs:
             -t "${{ vars.SCW_REGISTRY }}/canton:latest" \
             .
 
+      # CIP-56/DFNS wiring -- gets the current DAR onto devnet's
+      # participant *before* the (approval-gated) deploy job below ever
+      # flips production over to LEDGER_TARGET=devnet, so there's no
+      # window where production points at devnet but devnet doesn't have
+      # the package yet. Pulls the DAR straight out of the canton image
+      # instead of reinstalling dpm/JDK on the runner -- that image
+      # already ran `dpm build` from this exact commit's daml/ sources
+      # one step up, no reason to duplicate the toolchain setup to get
+      # the same file a second way. Verified manually against devnet
+      # before wiring this in: `dpm build` -> get a client-credentials
+      # token from LEDGER_API_TOKEN_URL -> POST the raw DAR bytes to
+      # {LEDGER_API_URL}/v2/packages with that token as a Bearer header
+      # -- confirmed the package actually registered by checking the
+      # Five North dashboard's Packages list afterward, not just trusting
+      # the `{}` response (Canton's JSON API returns that on success with
+      # no further detail, so the dashboard check was the real proof).
+      - name: Upload DAR to devnet
+        run: |
+          id=$(docker create "${{ vars.SCW_REGISTRY }}/canton:${{ steps.tag.outputs.value }}")
+          docker cp "$id":/app/.daml/dist/ozmium-cashflow-0.1.0.dar ./ozmium-cashflow.dar
+          docker rm "$id" > /dev/null
+
+          token_response=$(curl -sS -X POST "${{ vars.LEDGER_API_TOKEN_URL }}" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data "grant_type=client_credentials&client_id=${{ vars.LEDGER_API_CLIENT_ID }}&client_secret=${{ secrets.LEDGER_API_CLIENT_SECRET }}&scope=${{ vars.LEDGER_API_SCOPE }}")
+          token=$(echo "$token_response" | jq -r '.access_token // empty')
+          if [ -z "$token" ]; then
+            echo "Couldn't get a devnet access token. Response was:"
+            echo "$token_response"
+            exit 1
+          fi
+
+          base_url="$(echo "${{ vars.LEDGER_API_URL }}" | sed 's:/*$::')"
+          http_code=$(curl -sS -o /tmp/upload-response.json -w "%{http_code}" \
+            -X POST "$base_url/v2/packages" \
+            -H "Authorization: Bearer $token" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @ozmium-cashflow.dar)
+          echo "Upload response ($http_code):"
+          cat /tmp/upload-response.json
+          if [ "$http_code" -ge 300 ]; then
+            exit 1
+          fi
+
       - name: Build dashboard image
         run: |
           docker build -f deploy/Dockerfile.dashboard \
