@@ -124,11 +124,22 @@ async function getDevnetToken() {
 // fare any better against the same server and this is the one piece of
 // this proxy that's actually been proven against a live sandbox before.
 export default async function handler(req, res) {
-  const pathParts = req.query.path;
+  // Next.js splits a catch-all route's query string into `path` (the
+  // segment array) plus every other param as its own req.query key --
+  // it does NOT put the raw query string anywhere. Missing this meant
+  // ?pageSize=...&pageToken=... from lib/api.js's pagination was
+  // silently dropped on every request, so the "paginated" party lookup
+  // was actually re-fetching the exact same first page 20 times in a
+  // row against devnet -- looked like the UI was just stuck, when it
+  // was really just doing 20x more round trips than it needed to for no
+  // benefit at all.
+  const { path: pathParts, ...restQuery } = req.query;
   const path = Array.isArray(pathParts) ? pathParts.join("/") : "";
+  const qs = new URLSearchParams(restQuery).toString();
+  const suffix = qs ? `?${qs}` : "";
   const target = DEVNET_MODE
-    ? `${LEDGER_API_URL.replace(/\/+$/, "")}/v2/${path}`
-    : `http://${JSON_API_HOST}:${JSON_API_PORT}/v2/${path}`;
+    ? `${LEDGER_API_URL.replace(/\/+$/, "")}/v2/${path}${suffix}`
+    : `http://${JSON_API_HOST}:${JSON_API_PORT}/v2/${path}${suffix}`;
 
   const body = req.method === "POST" ? await readRawBody(req) : Buffer.alloc(0);
 
