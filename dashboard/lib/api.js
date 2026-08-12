@@ -118,22 +118,56 @@ export async function submitCommand(actAs, commands) {
   });
 }
 
+// Paginated -- a shared node like devnet can already have far more
+// parties on it than the local dpm sandbox ever did (other builds, other
+// people's testing, DFNS/CIP-56 work, whatever else runs against the
+// same participant), so a single unpaginated GET can miss a party that's
+// sitting past the first page. Hard-capped at 20 pages so a pagination
+// bug on either end can't spin forever.
+async function fetchAllKnownParties() {
+  const all = [];
+  let pageToken = "";
+  for (let i = 0; i < 20; i++) {
+    const qs = pageToken ? `?pageSize=1000&pageToken=${encodeURIComponent(pageToken)}` : "?pageSize=1000";
+    const res = await apiFetch(`/v2/parties${qs}`);
+    const list = res.partyDetails || res || [];
+    if (Array.isArray(list)) all.push(...list);
+    pageToken = res.nextPageToken;
+    if (!pageToken) break;
+  }
+  return all;
+}
+
+async function findKnownParty(hint) {
+  const all = await fetchAllKnownParties();
+  const found = all.find((p) => String(p.party || p).includes(hint));
+  return found ? found.party || found : null;
+}
+
 // Mirrors MockAttestor.daml's getOrAllocateParty -- reuse an existing
 // party whose id contains this hint if one's already on the ledger (so
 // clicking Setup twice doesn't spawn duplicate party sets), otherwise
-// allocate a fresh one.
+// allocate a fresh one. On a real shared participant (devnet) it's
+// possible for a party to already exist without our own paginated
+// search having found it -- worth re-checking once via the same search
+// rather than treating a "party already exists" 400 as a hard failure,
+// since the party we wanted is -- by definition -- already right there.
 export async function getOrAllocateParty(hint) {
-  const res = await apiFetch("/v2/parties");
-  const list = res.partyDetails || res || [];
-  const found = Array.isArray(list) ? list.find((p) => String(p.party || p).includes(hint)) : null;
-  if (found) return found.party || found;
-  const created = await apiFetch("/v2/parties", { partyIdHint: hint });
-  return created.partyDetails.party;
+  const found = await findKnownParty(hint);
+  if (found) return found;
+
+  try {
+    const created = await apiFetch("/v2/parties", { partyIdHint: hint });
+    return created.partyDetails.party;
+  } catch (err) {
+    if (!/already exists/i.test(err.message)) throw err;
+    const retryFound = await findKnownParty(hint);
+    if (retryFound) return retryFound;
+    throw err;
+  }
 }
 
 export async function listKnownParties() {
-  const res = await apiFetch("/v2/parties");
-  const list = res.partyDetails || res || [];
-  if (!Array.isArray(list)) return [];
-  return list.map((p) => p.party || p);
+  const all = await fetchAllKnownParties();
+  return all.map((p) => p.party || p);
 }
