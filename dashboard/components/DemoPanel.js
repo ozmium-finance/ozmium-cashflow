@@ -71,16 +71,26 @@ export default function DemoPanel() {
   }
 
   async function stepSetup() {
-    const admin = await getOrAllocateParty("Admin");
-    const propManager = await getOrAllocateParty("PropManagerCo");
-    const berlinSpv = await getOrAllocateParty("BerlinSPV");
-    const investor1 = await getOrAllocateParty("InvestorAlice");
-    const investor2 = await getOrAllocateParty("InvestorBob");
-    const investor3 = await getOrAllocateParty("InvestorCarol");
+    // Hints are prefixed "OzmiumCashflow" rather than the plain
+    // "Admin"/"PropManagerCo"/... used during earlier local testing --
+    // those short generic hints already exist on devnet from that
+    // testing, and devnet is a large shared node with no server-side
+    // party filter, so re-discovering an already-existing hint means
+    // paging through everything ahead of it (impractical -- see
+    // lib/api.js's getOrAllocateParty). A distinctive, not-yet-used
+    // hint just allocates cleanly on the first try; lib/api.js then
+    // caches the resulting id in localStorage so this only ever
+    // happens once per browser.
+    const admin = await getOrAllocateParty("OzmiumCashflowAdmin");
+    const propManager = await getOrAllocateParty("OzmiumCashflowPropManagerCo");
+    const berlinSpv = await getOrAllocateParty("OzmiumCashflowBerlinSPV");
+    const investor1 = await getOrAllocateParty("OzmiumCashflowInvestorAlice");
+    const investor2 = await getOrAllocateParty("OzmiumCashflowInvestorBob");
+    const investor3 = await getOrAllocateParty("OzmiumCashflowInvestorCarol");
     // Only used by the token-vesting scenario (issuer of the OZM SAFT
     // AllocationTable), but allocated here too so Setup stays the one
     // step that seeds every party regardless of which scenario runs.
-    const ozmiumIssuer = await getOrAllocateParty("OzmiumIssuer");
+    const ozmiumIssuer = await getOrAllocateParty("OzmiumCashflowIssuer");
     const parties = { admin, propManager, berlinSpv, investor1, investor2, investor3, ozmiumIssuer };
     dispatch(setSetupField({ parties }));
     log("Parties ready: Admin, PropManagerCo, BerlinSPV, 3 investors, OzmiumIssuer");

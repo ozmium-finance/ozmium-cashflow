@@ -118,13 +118,100 @@ export async function submitCommand(actAs, commands) {
   });
 }
 
-// Paginated -- a shared node like devnet can already have far more
-// parties on it than the local dpm sandbox ever did (other builds, other
+// devnet is a large *shared* participant -- other builds, other
 // people's testing, DFNS/CIP-56 work, whatever else runs against the
-// same participant), so a single unpaginated GET can miss a party that's
-// sitting past the first page. Hard-capped at 20 pages so a pagination
-// bug on either end can't spin forever.
-async function fetchAllKnownParties() {
+// same node -- and ListKnownParties has no server-side filter, only
+// pageSize/pageToken. In practice that list is tens of thousands of
+// entries long, almost all of them auto-generated hex/UUID-style hints
+// (leading chars '0'-'9'/'a'-'f'). Searching it top-to-bottom for one
+// hint by paging through everything ahead of it is impractical -- a
+// 20-page cap found nothing, and there's no cap short of "page through
+// the whole node" that's actually guaranteed to reach a given hint.
+//
+// So this no longer searches-then-creates. It remembers party ids this
+// browser has already resolved (localStorage, keyed by hint) and, on a
+// cache miss, just tries to allocate -- which is one cheap request, not
+// a scan. The only case that still needs a bounded search is a genuine
+// "already exists" reply, and even then it only needs to search for the
+// *one* hint that just collided, not pre-scan for all of them.
+const PARTY_CACHE_KEY = "ozmium-known-parties-v1";
+
+function loadPartyCache() {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(window.localStorage.getItem(PARTY_CACHE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function cacheParty(hint, party) {
+  if (typeof window === "undefined") return;
+  try {
+    const cache = loadPartyCache();
+    cache[hint] = party;
+    window.localStorage.setItem(PARTY_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // Storage full/unavailable -- non-fatal, we'll just re-resolve next time.
+  }
+}
+
+// Every hint this app uses (Admin, PropManagerCo, BerlinSPV,
+// InvestorAlice/Bob/Carol, OzmiumIssuer) starts with an uppercase
+// letter. Parties come back sorted by their full id string, and almost
+// everything else on this shared node sorts either before ours (digits)
+// or after (lowercase hex/UUID hints) -- so once a page's entries have
+// moved past the uppercase range (> 'Z', 0x5A), nothing on any later
+// page can still match, and it's safe to stop instead of paging through
+// the rest of a very large, unrelated tail.
+function pastUppercaseRange(partyId) {
+  return partyId.charCodeAt(0) > 0x5a;
+}
+
+async function searchForParty(hint, maxPages = 100) {
+  let pageToken = "";
+  for (let i = 0; i < maxPages; i++) {
+    const qs = pageToken ? `?pageSize=1000&pageToken=${encodeURIComponent(pageToken)}` : "?pageSize=1000";
+    const res = await apiFetch(`/v2/parties${qs}`);
+    const list = res.partyDetails || res || [];
+    for (const p of list) {
+      const id = p.party || p;
+      if (String(id).includes(hint)) return id;
+    }
+    if (list.length > 0 && pastUppercaseRange(list[list.length - 1].party || list[list.length - 1])) break;
+    pageToken = res.nextPageToken;
+    if (!pageToken) break;
+  }
+  return null;
+}
+
+// Mirrors MockAttestor.daml's getOrAllocateParty -- reuse an existing
+// party for this hint if we've already resolved one (checked locally
+// first, no network round trip), otherwise allocate fresh. A "party
+// already exists" reply on create only happens for hints from earlier
+// testing sessions predating this cache -- handled by one bounded
+// search for just that hint, not a full pre-scan on every call.
+export async function getOrAllocateParty(hint) {
+  const cached = loadPartyCache()[hint];
+  if (cached) return cached;
+
+  try {
+    const created = await apiFetch("/v2/parties", { partyIdHint: hint });
+    const party = created.partyDetails.party;
+    cacheParty(hint, party);
+    return party;
+  } catch (err) {
+    if (!/already exists/i.test(err.message)) throw err;
+    const found = await searchForParty(hint);
+    if (found) {
+      cacheParty(hint, found);
+      return found;
+    }
+    throw err;
+  }
+}
+
+export async function listKnownParties() {
   const all = [];
   let pageToken = "";
   for (let i = 0; i < 20; i++) {
@@ -135,39 +222,5 @@ async function fetchAllKnownParties() {
     pageToken = res.nextPageToken;
     if (!pageToken) break;
   }
-  return all;
-}
-
-async function findKnownParty(hint) {
-  const all = await fetchAllKnownParties();
-  const found = all.find((p) => String(p.party || p).includes(hint));
-  return found ? found.party || found : null;
-}
-
-// Mirrors MockAttestor.daml's getOrAllocateParty -- reuse an existing
-// party whose id contains this hint if one's already on the ledger (so
-// clicking Setup twice doesn't spawn duplicate party sets), otherwise
-// allocate a fresh one. On a real shared participant (devnet) it's
-// possible for a party to already exist without our own paginated
-// search having found it -- worth re-checking once via the same search
-// rather than treating a "party already exists" 400 as a hard failure,
-// since the party we wanted is -- by definition -- already right there.
-export async function getOrAllocateParty(hint) {
-  const found = await findKnownParty(hint);
-  if (found) return found;
-
-  try {
-    const created = await apiFetch("/v2/parties", { partyIdHint: hint });
-    return created.partyDetails.party;
-  } catch (err) {
-    if (!/already exists/i.test(err.message)) throw err;
-    const retryFound = await findKnownParty(hint);
-    if (retryFound) return retryFound;
-    throw err;
-  }
-}
-
-export async function listKnownParties() {
-  const all = await fetchAllKnownParties();
   return all.map((p) => p.party || p);
 }
