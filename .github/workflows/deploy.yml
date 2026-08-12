@@ -88,6 +88,17 @@ jobs:
           POSTGRES_DB=${{ vars.SCW_DB_NAME }}
           POSTGRES_USER=${{ vars.SCW_DB_USER }}
           POSTGRES_PASSWORD=${{ secrets.SCW_DB_PASSWORD }}
+          LEDGER_TARGET=devnet
+          LEDGER_API_URL=${{ vars.LEDGER_API_URL }}
+          LEDGER_API_CLIENT_ID=${{ vars.LEDGER_API_CLIENT_ID }}
+          LEDGER_API_CLIENT_SECRET=${{ secrets.LEDGER_API_CLIENT_SECRET }}
+          LEDGER_API_TOKEN_URL=${{ vars.LEDGER_API_TOKEN_URL }}
+          LEDGER_API_SCOPE=${{ vars.LEDGER_API_SCOPE }}
+          DFNS_SERVICE_ACCOUNT_PRIVATE_KEY_BASE64=${{ secrets.DFNS_SERVICE_ACCOUNT_PRIVATE_KEY_BASE64 }}
+          DFNS_SERVICE_ACCOUNT_AUTH_TOKEN=${{ secrets.DFNS_SERVICE_ACCOUNT_AUTH_TOKEN }}
+          DFNS_CREDENTIAL_ID=${{ secrets.DFNS_CREDENTIAL_ID }}
+          DFNS_ORG_ID=${{ vars.DFNS_ORG_ID }}
+          DFNS_API_URL=${{ vars.DFNS_API_URL }}
           EOF
 
       - name: Stop the old stack
@@ -169,3 +180,26 @@ jobs:
 #    the Instance's own IP, which is all Let's Encrypt needs to issue a
 #    certificate (it doesn't have to be a domain anyone owns). Caddy uses
 #    this to get HTTPS working automatically -- see deploy/Caddyfile.
+#
+# 4. CIP-56/DFNS wiring -- this now deploys with LEDGER_TARGET=devnet
+#    baked in, so the live site talks to the real ozmium-devnet-1
+#    validator instead of the bundled canton container this compose file
+#    also still runs (harmless, just unused once devnet mode is on --
+#    see JSON_API_HOST/DEVNET_MODE in pages/api/v2/[...path].js for why
+#    LEDGER_TARGET alone decides which one wins). Add these under
+#    Settings -> Secrets and variables -> Actions:
+#
+#    Variables: LEDGER_API_URL, LEDGER_API_CLIENT_ID, LEDGER_API_TOKEN_URL,
+#      LEDGER_API_SCOPE (daml_ledger_api), DFNS_ORG_ID, DFNS_API_URL
+#      (https://api.dfns.io) -- same values as dashboard/.env.local.example
+#      documents for local dev.
+#    Secrets: LEDGER_API_CLIENT_SECRET, DFNS_SERVICE_ACCOUNT_PRIVATE_KEY_BASE64,
+#      DFNS_SERVICE_ACCOUNT_AUTH_TOKEN, DFNS_CREDENTIAL_ID.
+#
+#    Worth knowing before turning this on: the "reset canton's databases
+#    for a clean demo on every deploy" step above only wipes the bundled
+#    container's own Postgres databases -- devnet is Alex's shared,
+#    persistent network, so once LEDGER_TARGET=devnet is live, the public
+#    demo site no longer starts from a guaranteed-empty ledger on every
+#    deploy the way it used to. Whatever state exists under these parties
+#    on devnet is what visitors will see.

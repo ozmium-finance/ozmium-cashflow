@@ -63,8 +63,29 @@ services:
       canton:
         condition: service_healthy
     environment:
+      # Fallback target -- only used if LEDGER_TARGET below isn't
+      # "devnet" (see DEVNET_MODE in pages/api/v2/[...path].js). Left in
+      # place even with devnet wired up so this container still has
+      # somewhere to point if the devnet vars are ever unset.
       JSON_API_HOST: canton
       JSON_API_PORT: "7575"
+      # CIP-56/DFNS wiring -- real ozmium-devnet-1 validator instead of
+      # the bundled canton container above, plus real DFNS-custodied
+      # wallet creation on CantonTestnet. All eight come from GitHub
+      # Actions secrets/variables via the .env the deploy workflow writes
+      # -- see the "one-time setup" comment block at the bottom of
+      # .github/workflows/deploy.yml.
+      LEDGER_TARGET: ${LEDGER_TARGET}
+      LEDGER_API_URL: ${LEDGER_API_URL}
+      LEDGER_API_CLIENT_ID: ${LEDGER_API_CLIENT_ID}
+      LEDGER_API_CLIENT_SECRET: ${LEDGER_API_CLIENT_SECRET}
+      LEDGER_API_TOKEN_URL: ${LEDGER_API_TOKEN_URL}
+      LEDGER_API_SCOPE: ${LEDGER_API_SCOPE}
+      DFNS_SERVICE_ACCOUNT_PRIVATE_KEY_BASE64: ${DFNS_SERVICE_ACCOUNT_PRIVATE_KEY_BASE64}
+      DFNS_SERVICE_ACCOUNT_AUTH_TOKEN: ${DFNS_SERVICE_ACCOUNT_AUTH_TOKEN}
+      DFNS_CREDENTIAL_ID: ${DFNS_CREDENTIAL_ID}
+      DFNS_ORG_ID: ${DFNS_ORG_ID}
+      DFNS_API_URL: ${DFNS_API_URL}
     expose:
       - "3000"
 
