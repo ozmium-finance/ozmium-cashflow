@@ -1,4 +1,4 @@
-import { LEDGER_API_URL, DEVNET_MODE, runCurl, getDevnetToken } from "../../../lib/devnetServer";
+import { LEDGER_API_URL, DEVNET_MODE, runCurl, getDevnetToken, decodeUserId } from "../../../lib/devnetServer";
 
 // Streams the raw request body straight through to curl instead of
 // letting Next.js parse/re-serialize it -- same reason serve.py forwarded
@@ -45,7 +45,7 @@ export default async function handler(req, res) {
     ? `${LEDGER_API_URL.replace(/\/+$/, "")}/v2/${path}${suffix}`
     : `http://${JSON_API_HOST}:${JSON_API_PORT}/v2/${path}${suffix}`;
 
-  const body = req.method === "POST" ? await readRawBody(req) : Buffer.alloc(0);
+  let body = req.method === "POST" ? await readRawBody(req) : Buffer.alloc(0);
 
   const args = ["-s", "-S", "-X", req.method, target, "-w", "\n%{http_code}"];
   if (DEVNET_MODE) {
@@ -57,6 +57,28 @@ export default async function handler(req, res) {
       return;
     }
     args.push("-H", `Authorization: Bearer ${token}`);
+
+    // lib/api.js's submitCommand sends a fixed userId ("ozmium-dashboard")
+    // on every command -- fine against the local dpm sandbox, which has
+    // no auth service to check it against, but devnet does. That string
+    // was never registered as a Ledger API User there, while the token
+    // itself authenticates as a real one (userId "10", confirmed via its
+    // own `sub` claim). Overwriting it here means every submit-and-wait
+    // call is made under the identity the token actually is, without
+    // having to plumb "what's our real userId" out to every browser-side
+    // call site individually.
+    if (path.startsWith("commands/") && body.length > 0) {
+      try {
+        const parsed = JSON.parse(body.toString("utf8"));
+        if (typeof parsed === "object" && parsed !== null && "userId" in parsed) {
+          parsed.userId = decodeUserId(token);
+          body = Buffer.from(JSON.stringify(parsed), "utf8");
+        }
+      } catch {
+        // Not JSON, or no userId field -- leave the body untouched and
+        // let Canton's own error response explain what's wrong with it.
+      }
+    }
   } else if (req.headers["authorization"]) {
     args.push("-H", `Authorization: ${req.headers["authorization"]}`);
   }
