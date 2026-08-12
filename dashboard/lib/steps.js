@@ -13,6 +13,12 @@ export const STEP_ORDER = {
   waterfall: [
     "setup", "attest", "validate", "distribute", "entitlement",
     "settle", "markPaid", "markPaid2", "markPaid3",
+    // Week 3 addition -- once every settlement's Paid, roll them up
+    // into an on-ledger report. Tacked onto the end of the waterfall
+    // chain rather than made its own scenario, since a report needs
+    // real Paid settlements to summarize and the waterfall scenarios
+    // are exactly where those come from.
+    "draftReport", "finalizeReport",
   ],
   vesting: [
     "setup", "allocate", "release",
@@ -21,6 +27,26 @@ export const STEP_ORDER = {
   licensing: [
     "setup", "attestFirst", "validateFirst", "revoke",
     "attestSecond", "validateRejected", "renew", "validateRenewed",
+  ],
+  // Week 3's other addition -- investor onboarding gating a
+  // subscription, self-onboarding propose-accept style (DA Registry's
+  // own pattern, per Alex's direction) rather than admin unilaterally
+  // registering someone. Two investors on purpose: Alice proposes,
+  // gets Approved, and her subscription goes through; Bob proposes,
+  // gets Rejected, and his subscription request -- which looks
+  // identical to Alice's -- gets turned away at Accept anyway. That
+  // contrast is the whole point, same reasoning as licensing's
+  // revoke/renew pair.
+  onboarding: [
+    "setup",
+    "requestOnboarding1", "approveOnboarding1", "requestSubscription1", "acceptSubscription1",
+    "requestOnboarding2", "rejectOnboarding2", "requestSubscription2", "acceptSubscription2Rejected",
+    // CIP-56/DFNS groundwork, tacked onto the end for the same reason
+    // draftReport/finalizeReport were tacked onto the waterfall chain --
+    // this needs a real Approved credential (Alice's) and a real
+    // Rejected one (Bob's) to demonstrate the gate, and this scenario is
+    // exactly where those come from.
+    "linkWallet1", "linkWallet2Rejected", "unlinkWallet1", "relinkWallet1",
   ],
 };
 
@@ -47,6 +73,20 @@ const STEP_TEXT = {
   validateRejected: "Validate (expect rejection — revoked)",
   renew: "Renew attestor's license",
   validateRenewed: "Validate again (expect success — renewed)",
+  draftReport: "Draft distribution report",
+  finalizeReport: "Finalize report (verify & summarize Paid settlements)",
+  requestOnboarding1: "Alice proposes onboarding",
+  approveOnboarding1: "Approve Alice's onboarding — issues her credential",
+  requestSubscription1: "Alice requests a subscription",
+  acceptSubscription1: "Accept Alice's subscription (expect success — Approved credential)",
+  requestOnboarding2: "Bob proposes onboarding",
+  rejectOnboarding2: "Reject Bob's onboarding — issues a Rejected credential",
+  requestSubscription2: "Bob requests a subscription",
+  acceptSubscription2Rejected: "Accept Bob's subscription (expect rejection — credential not Approved)",
+  linkWallet1: "Link Alice's Canton PartyID to a DFNS wallet",
+  linkWallet2Rejected: "Attempt to link Bob's wallet (expect rejection — credential not Approved)",
+  unlinkWallet1: "Unlink Alice's wallet mapping",
+  relinkWallet1: "Relink Alice to a rotated wallet id",
 };
 
 // Numbered relative to the scenario's own step order, since "settle" is

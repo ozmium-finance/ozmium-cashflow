@@ -1,0 +1,120 @@
+-- | DFNS/CIP-56 groundwork -- the AddressBook Identity Mapper. An
+-- Approved investor's credential can be linked to a DFNS wallet id;
+-- Rejected/Suspended credentials can't be linked at all; and a linked
+-- entry can be unlinked and re-linked (to a different wallet id) without
+-- needing a whole new onboarding cycle.
+--
+-- Done when: an Approved credential can be linked, Rejected/Suspended
+-- ones can't, and Unlink/Relink actually change status and (for Relink)
+-- the wallet id, not just get recorded alongside stale values.
+module Checkpoint9_AddressBookMapping where
+
+import DA.Assert
+import DA.Date
+import Daml.Script
+import Ozmium.Investor
+import Ozmium.AddressBook
+import Ozmium.Setup
+
+mkOnboardingRequest : Party -> Party -> Party -> Date -> InvestorOnboardingRequest
+mkOnboardingRequest investor fund admin submittedOn =
+  InvestorOnboardingRequest with
+    investor
+    fund
+    admin
+    submittedOn
+    applicationNotes = ""
+
+test_approvedInvestorCanBeLinkedToDfnsWallet : Script ()
+test_approvedInvestorCanBeLinkedToDfnsWallet = script do
+  DemoParties{..} <- allocateDemoParties
+
+  requestCid <- submit investor1 do
+    createCmd (mkOnboardingRequest investor1 berlinSpv admin (date 2026 Aug 1))
+  credentialCid <- submit admin do
+    exerciseCmd requestCid InvestorOnboardingRequest_Approve with
+      effectiveOn = date 2026 Aug 2
+      notes = "KYC cleared"
+
+  entryCid <- submit admin do
+    exerciseCmd credentialCid InvestorCredential_LinkDfnsWallet with
+      effectiveOn = date 2026 Aug 3
+      dfnsWalletId = "dfns-wallet-alice-001"
+      linkNotes = "Initial link"
+
+  Some entry <- queryContractId admin entryCid
+  entry.status === AddressBookLinked
+  entry.investor === investor1
+  entry.dfnsWalletId === "dfns-wallet-alice-001"
+
+test_rejectedInvestorCannotBeLinked : Script ()
+test_rejectedInvestorCannotBeLinked = script do
+  DemoParties{..} <- allocateDemoParties
+
+  requestCid <- submit investor2 do
+    createCmd (mkOnboardingRequest investor2 berlinSpv admin (date 2026 Aug 1))
+  credentialCid <- submit admin do
+    exerciseCmd requestCid InvestorOnboardingRequest_Reject with
+      effectiveOn = date 2026 Aug 2
+      notes = "Failed sanctions screening"
+
+  submitMustFail admin do
+    exerciseCmd credentialCid InvestorCredential_LinkDfnsWallet with
+      effectiveOn = date 2026 Aug 3
+      dfnsWalletId = "dfns-wallet-bob-001"
+      linkNotes = "Should not go through"
+
+test_suspendedInvestorCannotBeLinked : Script ()
+test_suspendedInvestorCannotBeLinked = script do
+  DemoParties{..} <- allocateDemoParties
+
+  requestCid <- submit investor1 do
+    createCmd (mkOnboardingRequest investor1 berlinSpv admin (date 2026 Aug 1))
+  approvedCid <- submit admin do
+    exerciseCmd requestCid InvestorOnboardingRequest_Approve with
+      effectiveOn = date 2026 Aug 2
+      notes = "KYC cleared"
+  suspendedCid <- submit admin do
+    exerciseCmd approvedCid InvestorCredential_Suspend with
+      effectiveOn = date 2026 Aug 3
+      notes = "Under re-review"
+
+  submitMustFail admin do
+    exerciseCmd suspendedCid InvestorCredential_LinkDfnsWallet with
+      effectiveOn = date 2026 Aug 4
+      dfnsWalletId = "dfns-wallet-alice-001"
+      linkNotes = "Should not go through"
+
+test_unlinkThenRelinkChangesWalletId : Script ()
+test_unlinkThenRelinkChangesWalletId = script do
+  DemoParties{..} <- allocateDemoParties
+
+  requestCid <- submit investor1 do
+    createCmd (mkOnboardingRequest investor1 berlinSpv admin (date 2026 Aug 1))
+  credentialCid <- submit admin do
+    exerciseCmd requestCid InvestorOnboardingRequest_Approve with
+      effectiveOn = date 2026 Aug 2
+      notes = "KYC cleared"
+  linkedCid <- submit admin do
+    exerciseCmd credentialCid InvestorCredential_LinkDfnsWallet with
+      effectiveOn = date 2026 Aug 3
+      dfnsWalletId = "dfns-wallet-alice-001"
+      linkNotes = "Initial link"
+
+  unlinkedCid <- submit admin do
+    exerciseCmd linkedCid AddressBookEntry_Unlink with
+      effectiveOn = date 2026 Aug 4
+      unlinkNotes = "Wallet compromised"
+
+  Some unlinked <- queryContractId admin unlinkedCid
+  unlinked.status === AddressBookUnlinked
+
+  relinkedCid <- submit admin do
+    exerciseCmd unlinkedCid AddressBookEntry_Relink with
+      effectiveOn = date 2026 Aug 5
+      newDfnsWalletId = "dfns-wallet-alice-002"
+      relinkNotes = "Rotated to new wallet"
+
+  Some relinked <- queryContractId admin relinkedCid
+  relinked.status === AddressBookLinked
+  relinked.dfnsWalletId === "dfns-wallet-alice-002"

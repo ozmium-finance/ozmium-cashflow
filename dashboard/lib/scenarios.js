@@ -20,6 +20,9 @@ export const SCENARIOS = {
       { deductionType: "servicing", amount: "125.00" },
     ],
     retentionAmount: "1875.00", retentionReason: "debt-service reserve",
+    // A few days after the period closes -- when the report step gets
+    // clicked, not when the revenue period itself ended.
+    reportGeneratedOn: "2026-07-05",
   },
   passThroughRent: {
     kind: "waterfall",
@@ -30,6 +33,7 @@ export const SCENARIOS = {
       { deductionType: "management fee", amount: "528.00" },
     ],
     retentionAmount: "0.00", retentionReason: "",
+    reportGeneratedOn: "2026-08-05",
   },
   quarterlyCoupon: {
     kind: "waterfall",
@@ -40,6 +44,7 @@ export const SCENARIOS = {
       { deductionType: "trustee fee", amount: "1000.00" },
     ],
     retentionAmount: "9000.00", retentionReason: "principal amortization reserve",
+    reportGeneratedOn: "2026-07-05",
   },
   tokenVesting: {
     kind: "vesting",
@@ -83,5 +88,37 @@ export const SCENARIOS = {
       },
     ],
     renewedExpiresOn: "2031-01-01",
+  },
+  investorOnboarding: {
+    kind: "onboarding",
+    label: "Investor onboarding — KYC gate & subscription (SAFT)",
+    // Reuses Setup's existing investor1/investor2 (Alice/Bob) rather
+    // than allocating new parties -- this scenario is about the
+    // registration/subscription contracts themselves, not about who the
+    // investors are. berlinSpv plays the issuer role here, same as it
+    // plays `fund` everywhere else -- one party, several titles
+    // depending on which contract's looking at it.
+    assetId: "OZM-SAFT-2026",
+    currency: "OZM",
+    // Alice: registered, approved, subscribes, gets accepted -- the
+    // happy path all the way through.
+    approvedInvestor: "investor1",
+    approvedAmount: "25000.00",
+    // Bob: registered, then rejected -- his subscription request looks
+    // exactly as valid as Alice's, but Accept has to turn it away
+    // anyway, since that's the one real check this skeleton exists to
+    // prove out.
+    rejectedInvestor: "investor2",
+    rejectedAmount: "10000.00",
+    // CIP-56/DFNS groundwork -- once Alice's credential is Approved, her
+    // Canton PartyID gets linked to a *real* DFNS-custodied CantonTestnet
+    // wallet (created live via lib/dfnsServer.js, not a placeholder
+    // string), then unlinked and relinked to a second real wallet
+    // (rotation), same "gate proven, then full lifecycle shown" shape as
+    // the credential itself demonstrating Suspend/Reinstate in
+    // Checkpoint7's tests. Bob's Rejected credential attempts the same
+    // link and is turned away before DFNS is ever called -- the
+    // AddressBook Identity Mapper is exactly as gated as subscription
+    // acceptance is, since both check the same credential.
   },
 };

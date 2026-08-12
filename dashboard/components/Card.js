@@ -61,6 +61,51 @@ export default function Card({ stageKey, ev }) {
         ["Source", a.sourceEventRef],
       ];
       break;
+    case "distributionReport": {
+      const entries = Array.isArray(a.entries) ? a.entries : [];
+      fields = [
+        ["Asset", a.assetId],
+        ["Period", `${a.periodStart} → ${a.periodEnd}`],
+        ["Total", money(a.totalDistributed, entries[0]?.currency)],
+        ["Holders", String(entries.length)],
+        ["Generated", a.generatedOn],
+      ];
+      break;
+    }
+    case "onboardingRequest":
+      fields = [
+        ["Investor", partyLabel(a.investor)],
+        ["Fund", partyLabel(a.fund)],
+        ["Submitted", a.submittedOn],
+        ["Notes", a.applicationNotes || "—"],
+      ];
+      break;
+    case "investorCredential":
+      fields = [
+        ["Investor", partyLabel(a.investor)],
+        ["Fund", partyLabel(a.fund)],
+        ["Status", a.status],
+        ["Notes", a.reviewNotes || "—"],
+      ];
+      break;
+    case "subscription":
+      fields = [
+        ["Investor", partyLabel(a.investor)],
+        ["Issuer", partyLabel(a.issuer)],
+        ["Asset", a.assetId],
+        ["Amount", money(a.requestedAmount, a.currency)],
+        ["Status", a.status],
+      ];
+      break;
+    case "addressBookEntry":
+      fields = [
+        ["Investor (PartyID)", partyLabel(a.investor)],
+        ["DFNS wallet", a.dfnsWalletId],
+        ["Status", a.status],
+        ["Linked", a.linkedOn],
+        ["Notes", a.notes || "—"],
+      ];
+      break;
     default:
       break;
   }

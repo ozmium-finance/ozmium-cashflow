@@ -13,7 +13,18 @@ export async function apiFetch(path, body) {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
-    throw new Error(`${path} -> HTTP ${res.status}\n${text}`);
+    // Canton's JSON API error body is usually { code, cause, ... } --
+    // surface `cause` right in the first line when we can parse it, so
+    // the demo log (which only shows the first line, to stay compact)
+    // still shows the actual reason instead of just a bare status code.
+    let cause = "";
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed?.cause) cause = `: ${parsed.cause}`;
+    } catch {
+      // Not JSON (or empty) -- fall back to just the status line below.
+    }
+    throw new Error(`${path} -> HTTP ${res.status}${cause}\n${text}`);
   }
   return res.json();
 }
@@ -68,6 +79,14 @@ export async function fetchActiveContractsForParty(partyId) {
       ?? r.createdEvent
       ?? r.contractEntry?.createdEvent)
     .filter(Boolean);
+}
+
+// Real DFNS wallet creation (CantonTestnet), routed through this app's
+// own /api/dfns/create-wallet -- same same-origin/no-CORS reasoning as
+// API_BASE above, plus it keeps the DFNS service account's credentials
+// server-side only (see lib/dfnsServer.js).
+export async function createDfnsWallet(name, externalId) {
+  return apiFetch("/dfns/create-wallet", { name, externalId });
 }
 
 export function matchStage(templateId, stageTemplate) {

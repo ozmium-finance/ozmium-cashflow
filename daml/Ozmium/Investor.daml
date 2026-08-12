@@ -1,0 +1,166 @@
+-- | Week 3 — investor onboarding and credential-gating, reworked per
+-- Alex's direction after reviewing the first draft of this module: base
+-- the flow on DA Registry's own credential-gating pattern rather than
+-- inventing a different shape.
+--
+-- Two things changed from the first draft:
+--
+-- 1. Self-onboarding, propose-accept -- the same shape DA Registry
+--    itself uses for a Provider/Registrar onboarding (the party being
+--    onboarded proposes, the authority accepts), rather than admin
+--    unilaterally creating a Pending record on the investor's behalf.
+--    That also means there's no separate Pending status to track
+--    anymore -- an InvestorOnboardingRequest's mere existence on the
+--    ledger *is* "pending review," so InvestorCredential only ever gets
+--    created already-decided.
+--
+-- 2. Renamed InvestorRegistration -> InvestorCredential, to actually
+--    use DA Registry's own vocabulary. The point isn't cosmetic: an
+--    Approved InvestorCredential is meant to be the same *kind* of
+--    on-ledger fact a DA Registry Instrument Configuration's credential
+--    gate checks (see Ozmium.Subscription) -- so when real DA Registry
+--    integration happens (Week 4+), this doesn't need translating, just
+--    pointing at.
+--
+-- Manual approval is still exactly what it was -- admin decides by
+-- hand, no live KYC provider wired in (none is locked in yet). The
+-- clean seam for one, per Alex: `investor : Party` is a real Canton
+-- PartyID with no indirection through an internal id, so a future
+-- AddressBook Identity Mapper (Canton PartyID -> DFNS WalletID) can
+-- read it straight off any Approved InvestorCredential. And
+-- InvestorCredential_Reinstate below (paired with _Suspend, same shape
+-- as AttestorRegistry_Revoke/_Renew) is the seam for automation to flip
+-- someone back to Approved later without a whole new onboarding cycle.
+module Ozmium.Investor where
+
+import Ozmium.AddressBook
+
+-- | Prefixed for the same reason as everywhere else in this codebase --
+-- unqualified imports everywhere means Approved/Rejected would collide
+-- with SubscriptionStatus's constructors the moment a file needs both
+-- in scope (Checkpoint7 does).
+data InvestorCredentialStatus
+  = InvestorApproved
+  | InvestorRejected
+  | InvestorSuspended
+  deriving (Eq, Show)
+
+-- | The investor's own proposal to onboard with `fund` -- signed by the
+-- investor, same as a DA Registry Provider/Registrar self-onboards by
+-- proposing themselves rather than being unilaterally registered by the
+-- authority above them. No credential exists yet at this point.
+--
+-- `admin` has to be a field here (and an observer), not just a loose
+-- choice argument on Approve/Reject below -- Daml's privacy model means
+-- a party has to actually be a stakeholder to fetch or exercise a
+-- choice on a contract at all. The first draft passed `admin` in as a
+-- choice argument without making them an observer, which compiled fine
+-- but failed at runtime with "contract not visible to the reading
+-- parties" the moment admin tried to act on it -- caught by the real
+-- `dpm test` run, not by the type checker.
+template InvestorOnboardingRequest
+  with
+    investor         : Party
+    fund             : Party
+    admin            : Party
+    submittedOn      : Date
+    applicationNotes : Text  -- free text, whatever the investor wants reviewers to see; "" is fine
+  where
+    signatory investor
+    observer fund, admin
+
+    choice InvestorOnboardingRequest_Approve : ContractId InvestorCredential
+      with
+        effectiveOn : Date
+        notes       : Text
+      controller admin
+      do
+        create InvestorCredential with
+          admin
+          fund
+          investor
+          status = InvestorApproved
+          reviewNotes = notes
+          lastUpdatedOn = effectiveOn
+
+    choice InvestorOnboardingRequest_Reject : ContractId InvestorCredential
+      with
+        effectiveOn : Date
+        notes       : Text
+      controller admin
+      do
+        create InvestorCredential with
+          admin
+          fund
+          investor
+          status = InvestorRejected
+          reviewNotes = notes
+          lastUpdatedOn = effectiveOn
+
+-- | The credential itself -- the on-ledger fact Ozmium.Subscription's
+-- Accept choice checks today, and the shape a real DA Registry
+-- credential gate would check once that integration exists. Scoped per
+-- fund rather than per-asset, same reasoning as the first draft: an
+-- investor's compliance standing is about their relationship with the
+-- issuer, not with any one token, so one credential covers every asset
+-- that fund offers.
+template InvestorCredential
+  with
+    admin         : Party
+    fund          : Party
+    investor      : Party
+    status        : InvestorCredentialStatus
+    reviewNotes   : Text
+    lastUpdatedOn : Date
+  where
+    signatory admin
+    observer fund, investor
+
+    -- Pulls a previously-Approved investor's access immediately,
+    -- independent of anything else about them -- same idea as
+    -- AttestorRegistry_Revoke pulling an attestor's license immediately
+    -- rather than waiting for a natural lapse.
+    choice InvestorCredential_Suspend : ContractId InvestorCredential
+      with
+        effectiveOn : Date
+        notes       : Text
+      controller admin
+      do
+        create this with status = InvestorSuspended, reviewNotes = notes, lastUpdatedOn = effectiveOn
+
+    -- Lifts a Suspended credential back to Approved -- the issue that
+    -- caused the suspension got resolved, or (once a live KYC provider
+    -- is wired in) their automation re-clears the investor. Same
+    -- "doesn't need a whole new proposal, just a re-decision" shape as
+    -- AttestorRegistry_Renew.
+    choice InvestorCredential_Reinstate : ContractId InvestorCredential
+      with
+        effectiveOn : Date
+        notes       : Text
+      controller admin
+      do
+        create this with status = InvestorApproved, reviewNotes = notes, lastUpdatedOn = effectiveOn
+
+    -- Links this Approved investor's Canton PartyID to a DFNS wallet --
+    -- see Ozmium.AddressBook for why the resulting record lives in its
+    -- own module rather than here. Checking status == InvestorApproved
+    -- explicitly (not just "this contract exists") is what actually
+    -- keeps a Suspended or Rejected investor from ever getting linked --
+    -- nothing about this choice's controller/signatory shape alone would
+    -- stop that otherwise.
+    choice InvestorCredential_LinkDfnsWallet : ContractId AddressBookEntry
+      with
+        effectiveOn  : Date
+        dfnsWalletId : Text
+        linkNotes    : Text
+      controller admin
+      do
+        assertMsg ("Investor's credential is not Approved (status: " <> show status <> ")") (status == InvestorApproved)
+        create AddressBookEntry with
+          admin
+          fund
+          investor
+          dfnsWalletId
+          linkedOn = effectiveOn
+          status = AddressBookLinked
+          notes = linkNotes

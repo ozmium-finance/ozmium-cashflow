@@ -1,0 +1,65 @@
+-- | CIP-56/DFNS groundwork -- the "AddressBook Identity Mapper" Alex
+-- described when he redirected the investor onboarding design: ties an
+-- Approved investor's Canton PartyID (their `investor : Party` field,
+-- already a real PartyID with no indirection through an internal id) to
+-- a DFNS WalletID. No live DFNS API or webhook integration exists yet,
+-- so linking is manual -- admin enters the wallet id by hand once DFNS
+-- provisions one out of band. Same manual-for-MVP shape as
+-- InvestorCredential's approval flow: the seam for real DFNS automation
+-- later is AddressBookEntry_Relink/_Unlink below, same idea as
+-- InvestorCredential_Reinstate/_Suspend, so a live integration has a
+-- single obvious action to call instead of needing a new template.
+module Ozmium.AddressBook where
+
+-- | Prefixed for the same unqualified-imports-everywhere reason as every
+-- other status enum in this codebase -- Linked/Unlinked alone would be
+-- fine today, but there's no reason to bank on nothing else in the
+-- module graph ever wanting those names.
+data AddressBookEntryStatus
+  = AddressBookLinked
+  | AddressBookUnlinked
+  deriving (Eq, Show)
+
+-- | Created only via InvestorCredential_LinkDfnsWallet (see
+-- Ozmium.Investor) rather than a bare `create` here -- that choice
+-- requires the credential to currently be Approved, so an
+-- AddressBookEntry can't come into existence for an investor who was
+-- never cleared, or whose clearance has since lapsed, without going
+-- through that check.
+template AddressBookEntry
+  with
+    admin        : Party
+    fund         : Party
+    investor     : Party  -- the Canton PartyID itself -- no internal id in between
+    dfnsWalletId : Text
+    linkedOn     : Date
+    status       : AddressBookEntryStatus
+    notes        : Text
+  where
+    signatory admin
+    observer fund, investor
+
+    -- Pulls a wallet mapping immediately -- investor suspended, wallet
+    -- compromised, whatever the reason. Same idea as
+    -- InvestorCredential_Suspend/AttestorRegistry_Revoke: take effect
+    -- now, don't wait for anything else to catch up first.
+    choice AddressBookEntry_Unlink : ContractId AddressBookEntry
+      with
+        effectiveOn : Date
+        unlinkNotes : Text
+      controller admin
+      do
+        create this with status = AddressBookUnlinked, notes = unlinkNotes, linkedOn = effectiveOn
+
+    -- Re-links, optionally to a *different* wallet id (a rotated DFNS
+    -- wallet, say) without needing a whole new InvestorCredential check --
+    -- same "doesn't need to restart from scratch" shape as
+    -- InvestorCredential_Reinstate.
+    choice AddressBookEntry_Relink : ContractId AddressBookEntry
+      with
+        effectiveOn     : Date
+        newDfnsWalletId : Text
+        relinkNotes     : Text
+      controller admin
+      do
+        create this with status = AddressBookLinked, dfnsWalletId = newDfnsWalletId, notes = relinkNotes, linkedOn = effectiveOn

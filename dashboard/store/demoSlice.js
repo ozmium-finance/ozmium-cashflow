@@ -27,6 +27,13 @@ function emptyRun() {
     // differs by scenario kind.
     entitlementFund: null,
     settlementCids: null,
+    // settlementCids gets drained as each markPaid* step pops one off
+    // (see markNextSettlementPaid below) -- this keeps the full original
+    // set around too, since the reporting step needs every settlement
+    // this run produced, not just whatever's still unpaid.
+    allSettlementCids: null,
+    reportDraftCid: null,
+    reportCid: null,
     // Only used by the attestor-licensing scenario -- two separate
     // RevenueAttestations (before and after the revoke/renew cycle),
     // kept as distinct fields since both are alive across several
@@ -34,6 +41,26 @@ function emptyRun() {
     // ever have one attestation-shaped contract in flight).
     firstAttestationCid: null,
     secondAttestationCid: null,
+    // Only used by the investor-onboarding scenario -- Alice's and
+    // Bob's onboarding/credential/subscription contracts, kept as
+    // distinct fields for the same reason as above: both investors'
+    // contracts are alive across the run at once, not sequential like
+    // the waterfall chain's single attestation-at-a-time shape.
+    // Request and Credential are two separate cids per investor now
+    // (propose-accept), not one recreated contract -- approving a
+    // request *creates* the credential, it doesn't just relabel the
+    // request.
+    investor1RequestCid: null,
+    investor1CredentialCid: null,
+    investor2RequestCid: null,
+    investor2CredentialCid: null,
+    subscription1Cid: null,
+    subscription2Cid: null,
+    // CIP-56/DFNS groundwork -- only Alice's AddressBookEntry is tracked
+    // (Bob's link attempt is expected to fail and never creates one),
+    // updated in place across link -> unlink -> relink the same way
+    // investor1CredentialCid gets replaced across Suspend/Reinstate.
+    investor1AddressBookCid: null,
     // Locked in at the moment step 2 runs, so this run's later steps
     // keep using the scenario data as it was when the run started, even
     // if SCENARIOS itself is inspected again later.
@@ -47,6 +74,13 @@ function emptyRun() {
       attestFirst: false, validateFirst: false, revoke: false,
       attestSecond: false, validateRejected: false, renew: false,
       validateRenewed: false,
+      draftReport: false, finalizeReport: false,
+      requestOnboarding1: false, approveOnboarding1: false,
+      requestSubscription1: false, acceptSubscription1: false,
+      requestOnboarding2: false, rejectOnboarding2: false,
+      requestSubscription2: false, acceptSubscription2Rejected: false,
+      linkWallet1: false, linkWallet2Rejected: false,
+      unlinkWallet1: false, relinkWallet1: false,
     },
   };
 }
