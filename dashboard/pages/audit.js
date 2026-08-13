@@ -29,9 +29,23 @@ export default function AuditPage() {
     try {
       const events = await fetchActiveContracts();
 
+      // RevenueAttestation is a *consuming* choice's input -- by the time a
+      // SettlementInstruction exists, Attestation_Validate has already run,
+      // which archives the original RevenueAttestation and creates a
+      // ValidatedRevenueEvent in its place. Since this only reads active
+      // contracts (see the file-level comment above), RevenueAttestation
+      // was never actually findable here once a settlement existed to
+      // trace back in the first place -- every row showed "no matching
+      // attestation found" unconditionally. ValidatedRevenueEvent carries
+      // the same attestor/grossAmount/currency/periodStart/periodEnd/
+      // sourceRef fields forward, and it's the one still active at this
+      // point in the pipeline, so match against both: whichever exists.
       const attestationsByRef = {};
       for (const ev of events) {
-        if (ev.templateId?.endsWith(":Ozmium.Attestation:RevenueAttestation")) {
+        if (
+          ev.templateId?.endsWith(":Ozmium.Attestation:RevenueAttestation") ||
+          ev.templateId?.endsWith(":Ozmium.Validation:ValidatedRevenueEvent")
+        ) {
           const a = ev.createArgument || {};
           attestationsByRef[a.sourceRef] = a;
         }

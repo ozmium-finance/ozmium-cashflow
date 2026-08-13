@@ -2,7 +2,7 @@ import Head from "next/head";
 import { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { setInvestorParty } from "../store/uiSlice";
-import { apiFetch, fetchActiveContractsForParty, listOwnKnownParties } from "../lib/api";
+import { apiFetch, fetchActiveContractsForParty, listOwnKnownPartyEntries } from "../lib/api";
 import { money, num, partyLabel } from "../lib/format";
 import StatusBadge from "../components/StatusBadge";
 
@@ -28,19 +28,29 @@ export default function InvestorPage() {
   const [settlements, setSettlements] = useState([]);
 
   useEffect(() => {
-    // Synchronous now -- listOwnKnownParties just reads the same
+    // Synchronous now -- listOwnKnownPartyEntries just reads the same
     // localStorage cache getOrAllocateParty already maintains, no
     // ledger round trip. Empty means Setup hasn't been run yet in this
     // browser (or its cache was cleared) -- same "fall back to manual
     // entry" behavior as before for that case.
-    const list = listOwnKnownParties();
-    if (list.length === 0) {
+    const entries = listOwnKnownPartyEntries();
+    if (entries.length === 0) {
       setKnownParties([]);
       setManualEntry(true);
       return;
     }
+    const list = entries.map(([, party]) => party);
     setKnownParties(list);
-    if (!investorParty) dispatch(setInvestorParty(list[0]));
+    if (!investorParty) {
+      // stepSetup allocates Admin first, so entries[0] is Admin, not an
+      // investor -- an "Investor View" defaulting to Admin is a
+      // confusing first impression. Prefer whichever cached hint
+      // actually contains "Investor" (InvestorAlice/Bob/Carol), falling
+      // back to the first entry if Setup somehow never ran the investor
+      // allocations at all.
+      const preferred = entries.find(([hint]) => hint.includes("Investor"));
+      dispatch(setInvestorParty((preferred || entries[0])[1]));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -285,3 +285,10 @@ export async function getOrAllocateParty(hint) {
 export function listOwnKnownParties() {
   return Object.values(loadPartyCache());
 }
+
+// [hint, party] pairs instead of just party ids -- lets a caller pick a
+// smarter default than "whichever got allocated first" (which is Admin,
+// since stepSetup allocates it before any investor).
+export function listOwnKnownPartyEntries() {
+  return Object.entries(loadPartyCache());
+}
