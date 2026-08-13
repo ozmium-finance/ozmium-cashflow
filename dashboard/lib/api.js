@@ -156,6 +156,32 @@ function cacheParty(hint, party) {
   }
 }
 
+// Learned the hard way: even a *distinctive* fixed hint isn't enough to
+// avoid the search fallback forever -- clear the party cache (browser
+// data wipe, or just testing) and the next allocate collides with the
+// party this exact browser already made, right back into paging through
+// devnet's huge unrelated party list. A per-browser random suffix, generated
+// once and kept separately from the resolved-party cache, means every
+// hint this browser ever asks for is fresh from the very first attempt --
+// create just succeeds, no collision, no search. The suffix key is only
+// ever cleared by wiping site data entirely, at which point a brand new
+// (still fresh) suffix is fine too.
+const PARTY_SUFFIX_KEY = "ozmium-party-suffix-v1";
+
+function getPartySuffix() {
+  if (typeof window === "undefined") return "local";
+  try {
+    let suffix = window.localStorage.getItem(PARTY_SUFFIX_KEY);
+    if (!suffix) {
+      suffix = Math.random().toString(36).slice(2, 8);
+      window.localStorage.setItem(PARTY_SUFFIX_KEY, suffix);
+    }
+    return suffix;
+  } catch {
+    return "local";
+  }
+}
+
 // Every hint this app uses (Admin, PropManagerCo, BerlinSPV,
 // InvestorAlice/Bob/Carol, OzmiumIssuer) starts with an uppercase
 // letter. Parties come back sorted by their full id string, and almost
@@ -205,10 +231,11 @@ async function grantActAs(party) {
 
 // Mirrors MockAttestor.daml's getOrAllocateParty -- reuse an existing
 // party for this hint if we've already resolved one (checked locally
-// first, no network round trip), otherwise allocate fresh. A "party
-// already exists" reply on create only happens for hints from earlier
-// testing sessions predating this cache -- handled by one bounded
-// search for just that hint, not a full pre-scan on every call.
+// first, no network round trip), otherwise allocate fresh. The actual
+// on-chain partyIdHint is this browser's suffixed version (see
+// getPartySuffix above), so create essentially always succeeds on the
+// first try -- the cache below is keyed by the plain, unsuffixed hint,
+// so callers never see the suffix at all.
 //
 // Every path that resolves a *new-to-this-cache* party id also grants
 // it CanActAs before returning -- allocating (or discovering) a party
@@ -220,15 +247,21 @@ export async function getOrAllocateParty(hint) {
   const cached = loadPartyCache()[hint];
   if (cached) return cached;
 
+  const uniqueHint = `${hint}-${getPartySuffix()}`;
+
   try {
-    const created = await apiFetch("/v2/parties", { partyIdHint: hint });
+    const created = await apiFetch("/v2/parties", { partyIdHint: uniqueHint });
     const party = created.partyDetails.party;
     await grantActAs(party);
     cacheParty(hint, party);
     return party;
   } catch (err) {
     if (!/already exists/i.test(err.message)) throw err;
-    const found = await searchForParty(hint);
+    // Only reachable if this exact browser+suffix already made this
+    // exact party (e.g. a grant/cache-write failed after a create that
+    // itself succeeded) -- a narrow, rare case, unlike searching for a
+    // bare hint against devnet's entire unrelated party list.
+    const found = await searchForParty(uniqueHint);
     if (found) {
       await grantActAs(found);
       cacheParty(hint, found);
@@ -238,16 +271,17 @@ export async function getOrAllocateParty(hint) {
   }
 }
 
-export async function listKnownParties() {
-  const all = [];
-  let pageToken = "";
-  for (let i = 0; i < 20; i++) {
-    const qs = pageToken ? `?pageSize=1000&pageToken=${encodeURIComponent(pageToken)}` : "?pageSize=1000";
-    const res = await apiFetch(`/v2/parties${qs}`);
-    const list = res.partyDetails || res || [];
-    if (Array.isArray(list)) all.push(...list);
-    pageToken = res.nextPageToken;
-    if (!pageToken) break;
-  }
-  return all.map((p) => p.party || p);
+// Used to be a full ledger-wide GET /v2/parties (paginated) -- fine
+// against the local dpm sandbox, which only ever had this app's own
+// handful of parties on it, but on devnet that's every party any
+// project sharing the node has ever allocated (tens of thousands), with
+// no way to tell which ones are ours. investor.js used this to build
+// its "pick which investor you are" dropdown and defaulted to the
+// first result -- meaning it was defaulting to some unrelated party
+// from a completely different project the moment devnet mode went
+// live. What that dropdown actually needs is just the parties *this*
+// app allocated, which is exactly what's already sitting in the
+// getOrAllocateParty cache -- no ledger round trip required at all.
+export function listOwnKnownParties() {
+  return Object.values(loadPartyCache());
 }
