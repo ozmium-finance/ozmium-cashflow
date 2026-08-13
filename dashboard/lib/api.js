@@ -57,6 +57,56 @@ export async function fetchActiveContracts() {
     .filter(Boolean);
 }
 
+// Full-history CreatedEvents (including ones for contracts that have
+// since been archived) -- for tracing a settlement back to its source
+// attestation. Every step in the attestation -> validate -> distribute
+// -> entitlement -> settle pipeline is a *consuming* choice, so by the
+// time a SettlementInstruction exists, every upstream contract in its
+// chain has already been archived and dropped out of active-contracts.
+// fetchActiveContracts can never find them; only the transaction stream
+// (which keeps a record of archived contracts, not just current state)
+// can. See audit.js.
+//
+// Deliberately scoped to filtersByParty for this app's own known
+// parties rather than filtersForAnyParty's wildcard -- learned earlier
+// today that a wildcard scan against a busy shared devnet (rather than
+// the small local sandbox this was first built against) means paging
+// through everything anyone else on the node has ever done. Scoping to
+// parties we actually allocated keeps this to just our own history.
+export async function fetchHistoricalCreates() {
+  const parties = listOwnKnownParties();
+  if (parties.length === 0) return [];
+
+  const end = await apiFetch("/v2/state/ledger-end");
+  const filtersByParty = {};
+  for (const p of parties) {
+    filtersByParty[p] = {
+      cumulative: [{ identifierFilter: { WildcardFilter: { value: { includeCreatedEventBlob: false } } } }],
+    };
+  }
+  const query = {
+    beginExclusive: 0,
+    endInclusive: end.offset,
+    eventFormat: { filtersByParty, filtersForAnyParty: null, verbose: false },
+  };
+  const rows = await apiFetch("/v2/updates/flats", query);
+
+  const events = [];
+  for (const r of (Array.isArray(rows) ? rows : [])) {
+    // Defensive about wrapper shape, same reasoning as fetchActiveContracts
+    // -- haven't been able to confirm the exact envelope for this
+    // endpoint against this participant version ahead of time the way
+    // active-contracts was already proven.
+    const tx = r.update?.Transaction?.value ?? r.Transaction?.value ?? r.transaction ?? r;
+    const txEvents = tx?.events ?? [];
+    for (const e of txEvents) {
+      const created = e.CreatedEvent?.value ?? e.CreatedEvent ?? e.createdEvent;
+      if (created) events.push(created);
+    }
+  }
+  return events;
+}
+
 // Investor-view style query: filtered to a single party instead of the
 // operator's wildcard, so results are genuinely scoped at the ledger
 // level for contracts where that party is the only observer.

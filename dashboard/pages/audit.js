@@ -2,7 +2,7 @@ import Head from "next/head";
 import { useCallback, useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import { setAuditSearch, setAuditStatusFilter } from "../store/uiSlice";
-import { fetchActiveContracts } from "../lib/api";
+import { fetchActiveContracts, fetchHistoricalCreates } from "../lib/api";
 import { money, num, partyLabel } from "../lib/format";
 import StatusBadge from "../components/StatusBadge";
 
@@ -28,20 +28,34 @@ export default function AuditPage() {
   const load = useCallback(async () => {
     try {
       const events = await fetchActiveContracts();
+      // Best-effort -- if the request shape this participant's version
+      // of /v2/updates/flats actually wants turns out to differ from
+      // what fetchHistoricalCreates guessed, trace-back just falls back
+      // to active-contracts-only matching (the old, known-incomplete
+      // behavior) instead of taking the whole page down.
+      let historical = [];
+      try {
+        historical = await fetchHistoricalCreates();
+      } catch (err) {
+        console.warn("fetchHistoricalCreates failed, trace-back will be incomplete:", err.message);
+      }
 
-      // RevenueAttestation is a *consuming* choice's input -- by the time a
-      // SettlementInstruction exists, Attestation_Validate has already run,
-      // which archives the original RevenueAttestation and creates a
-      // ValidatedRevenueEvent in its place. Since this only reads active
-      // contracts (see the file-level comment above), RevenueAttestation
-      // was never actually findable here once a settlement existed to
-      // trace back in the first place -- every row showed "no matching
-      // attestation found" unconditionally. ValidatedRevenueEvent carries
-      // the same attestor/grossAmount/currency/periodStart/periodEnd/
-      // sourceRef fields forward, and it's the one still active at this
-      // point in the pipeline, so match against both: whichever exists.
+      // Every step from attestation through settlement is a *consuming*
+      // choice (Attestation_Validate archives RevenueAttestation,
+      // ValidatedRevenueEvent_DecideDistribution archives that,
+      // EntitlementCalculation_Settle archives *that*) -- so by the time
+      // a SettlementInstruction exists, every upstream contract that
+      // could explain where it came from has already been archived.
+      // fetchActiveContracts alone can never find them; fetchHistoricalCreates
+      // reads the transaction stream instead, which still has a record
+      // of contracts that are no longer active. RevenueAttestation and
+      // ValidatedRevenueEvent both carry the same
+      // attestor/grossAmount/currency/periodStart/periodEnd/sourceRef
+      // shape the trace-back string below needs, so either is fine to
+      // match on -- whichever this specific settlement's chain still
+      // has a record of.
       const attestationsByRef = {};
-      for (const ev of events) {
+      for (const ev of [...events, ...historical]) {
         if (
           ev.templateId?.endsWith(":Ozmium.Attestation:RevenueAttestation") ||
           ev.templateId?.endsWith(":Ozmium.Validation:ValidatedRevenueEvent")
