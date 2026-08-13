@@ -84,10 +84,17 @@ export async function fetchHistoricalCreates() {
       cumulative: [{ identifierFilter: { WildcardFilter: { value: { includeCreatedEventBlob: false } } } }],
     };
   }
+  // Canton's own error on the first attempt at this (an eventFormat
+  // field, matching active-contracts' shape) was explicit: "Either
+  // filter/verbose or updateFormat is required" -- this endpoint takes
+  // the older, simpler filter+verbose pair active-contracts *doesn't*
+  // use, not eventFormat. Kept beginExclusive/endInclusive as numbers to
+  // match active-contracts' activeAtOffset convention on this participant.
   const query = {
     beginExclusive: 0,
     endInclusive: end.offset,
-    eventFormat: { filtersByParty, filtersForAnyParty: null, verbose: false },
+    verbose: false,
+    filter: { filtersByParty, filtersForAnyParty: null },
   };
   const rows = await apiFetch("/v2/updates/flats", query);
 
