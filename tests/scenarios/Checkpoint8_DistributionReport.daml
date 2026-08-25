@@ -31,9 +31,10 @@ test_finalizeSumsAllPaidSettlements = script do
       amount = 6000.00
       sourceEventRef = "checkpoint8-statement-1"
       status = Pending
+      dfnsTransferId = None
 
   settlement1Paid <- submit berlinSpv do
-    exerciseCmd settlement1Pending Settlement_MarkPaid
+    exerciseCmd settlement1Pending Settlement_MarkPaid with dfnsTransferId = None
 
   settlement2Pending <- submit berlinSpv do
     createCmd SettlementInstruction with
@@ -46,9 +47,10 @@ test_finalizeSumsAllPaidSettlements = script do
       amount = 3600.00
       sourceEventRef = "checkpoint8-statement-2"
       status = Pending
+      dfnsTransferId = None
 
   settlement2Paid <- submit berlinSpv do
-    exerciseCmd settlement2Pending Settlement_MarkPaid
+    exerciseCmd settlement2Pending Settlement_MarkPaid with dfnsTransferId = None
 
   draftCid <- submit berlinSpv do
     createCmd DistributionReportDraft with
@@ -84,6 +86,7 @@ test_finalizeRejectsUnpaidSettlement = script do
       amount = 6000.00
       sourceEventRef = "checkpoint8-statement-unpaid"
       status = Pending
+      dfnsTransferId = None
 
   draftCid <- submit berlinSpv do
     createCmd DistributionReportDraft with

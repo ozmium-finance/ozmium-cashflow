@@ -146,6 +146,25 @@ export async function createDfnsWallet(name, externalId) {
   return apiFetch("/dfns/create-wallet", { name, externalId });
 }
 
+// Resolves a DFNS walletId to its current on-chain address -- needed
+// because AddressBookEntry (Ozmium.AddressBook) only ever stores the
+// walletId, never the address, so anything that wants to actually send
+// to an investor's wallet has to look this up live.
+export async function getDfnsWallet(walletId) {
+  return apiFetch(`/dfns/get-wallet?walletId=${encodeURIComponent(walletId)}`);
+}
+
+// Week 4 -- the real settlement rail. Routed through /api/dfns/transfer-
+// cip56 (server-side, keeps DFNS credentials off the browser, same
+// reasoning as createDfnsWallet above). walletId/instrumentId/
+// instrumentAdmin are optional here -- when omitted the API route falls
+// back to the fund/treasury wallet and OZM's own CIP-56 identifiers
+// configured server-side (DFNS_ISSUER_WALLET_ID /
+// DFNS_OZM_INSTRUMENT_ID / DFNS_OZM_INSTRUMENT_ADMIN).
+export async function transferCip56Asset({ walletId, instrumentAdmin, instrumentId, to, amount, externalId }) {
+  return apiFetch("/dfns/transfer-cip56", { walletId, instrumentAdmin, instrumentId, to, amount, externalId });
+}
+
 export function matchStage(templateId, stageTemplate) {
   return typeof templateId === "string" && templateId.endsWith(":" + stageTemplate);
 }

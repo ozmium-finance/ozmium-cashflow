@@ -106,10 +106,15 @@ test_fullLifecycleEndToEnd = script do
   let byHolder = sortOn (\s -> show s.holder) paidOut
   length byHolder === 3
 
-  -- and the fund can mark one paid once the actual transfer clears
-  -- (e.g. a Hedera stablecoin transfer confirming on the other side)
+  -- and the fund can mark one paid once the actual transfer clears (e.g.
+  -- a Hedera stablecoin transfer, or -- Week 4 -- a real DFNS CIP-56
+  -- transfer on Canton itself, confirming on the other side). This
+  -- waterfall/rent scenario doesn't have DFNS wallets wired up, so it
+  -- passes None, same as it always effectively did before dfnsTransferId
+  -- existed -- see Checkpoint10 for the SAFT path that passes a real id.
   let (firstSettlementCid :: _) = settlementCids
   paidCid <- submit berlinSpv do
-    exerciseCmd firstSettlementCid Settlement_MarkPaid
+    exerciseCmd firstSettlementCid Settlement_MarkPaid with dfnsTransferId = None
   Some paidSettlement <- queryContractId berlinSpv paidCid
   paidSettlement.status === Paid
+  paidSettlement.dfnsTransferId === None

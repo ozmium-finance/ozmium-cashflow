@@ -56,3 +56,76 @@ export async function createCantonTestnetWallet({ name, externalId }) {
   });
   return wallet; // { id, network, address, status, ... }
 }
+
+// Looks up a wallet by id -- mainly to resolve its on-chain `address`,
+// since Settlement.daml/AddressBookEntry only ever store the DFNS
+// walletId (a `wa-...` id), never the address itself. Re-fetching this
+// live rather than caching it anywhere on the Canton side keeps the
+// wallet's actual current address as the single source of truth --
+// there's no rotation story to keep in sync otherwise.
+export async function getCantonTestnetWallet(walletId) {
+  return getDfnsClient().wallets.getWallet({ walletId });
+}
+
+// Week 4 -- the actual settlement rail. CIP-56 is Canton's own token
+// standard, and DFNS has native support for it (`kind: "Cip56"` on
+// transferAsset) -- so "wire CIP-56 and DFNS together" doesn't mean
+// hand-rolling a new holding/transfer contract on the Canton ledger, it
+// means calling this. instrumentId/instrumentAdmin identify which
+// CIP-56 instrument to move (the OZM token's own identifiers, set once
+// wherever OZM was actually registered/minted -- see
+// DFNS_OZM_INSTRUMENT_ID/DFNS_OZM_INSTRUMENT_ADMIN in .env.local); `to`
+// is the destination wallet's on-chain address (resolve via
+// getCantonTestnetWallet first, AddressBookEntry only has a walletId).
+//
+// externalId is the idempotency key DFNS itself enforces -- passing a
+// SettlementInstruction's own contract id here means retrying a failed
+// or ambiguous call can never double-pay the same instruction, without
+// this app needing to invent its own dedupe bookkeeping.
+export async function transferCip56Asset({
+  walletId,
+  instrumentAdmin,
+  instrumentId,
+  to,
+  amount,
+  externalId,
+}) {
+  const transfer = await getDfnsClient().wallets.transferAsset({
+    walletId,
+    body: {
+      kind: "Cip56",
+      instrumentAdmin,
+      instrumentId,
+      to,
+      amount,
+      externalId,
+    },
+  });
+  return transfer; // { id, status, txHash, ... } -- status starts Pending/Executing, not necessarily Confirmed yet
+}
+
+// SettlementInstruction.amount comes off the Canton ledger as a plain
+// decimal string (e.g. "50000.0000000000" -- Daml's Decimal, fixed at
+// scale 10). DFNS's transferAsset wants the amount in the token's own
+// minimum denomination (an integer string, same idea as wei for ETH),
+// which depends on however many decimals OZM's CIP-56 instrument was
+// actually registered with -- that's config this repo doesn't know
+// (DFNS_OZM_DECIMALS), not something to guess at. String-based on
+// purpose, not parseFloat/Math.round -- floating point on a real token
+// amount is exactly the kind of bug that's silent until it isn't.
+export function toMinimumDenomination(amountStr, decimals) {
+  const str = String(amountStr).trim();
+  const negative = str.startsWith("-");
+  const unsigned = negative ? str.slice(1) : str;
+  const [whole, frac = ""] = unsigned.split(".");
+  if (frac.length > decimals) {
+    // Refuse to silently truncate real precision rather than round it
+    // away -- a caller passing more fractional digits than the
+    // instrument actually supports almost certainly has the wrong
+    // decimals configured.
+    throw new Error(`Amount "${amountStr}" has more fractional digits than decimals=${decimals} supports`);
+  }
+  const fracPadded = frac.padEnd(decimals, "0");
+  const combined = `${whole}${fracPadded}`.replace(/^0+(?=\d)/, "");
+  return negative ? `-${combined}` : combined;
+}

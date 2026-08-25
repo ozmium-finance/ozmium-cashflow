@@ -22,6 +22,14 @@ export const STEP_ORDER = {
   ],
   vesting: [
     "setup", "allocate", "release",
+    // Week 4 -- the CIP-56/DFNS settlement wiring, chained into the SAFT
+    // scenario itself instead of only ever existing as the separate
+    // onboarding scenario's own demo path. Issuer wallet first (the
+    // treasury side settle will pay out of), then both holders onboarded
+    // and wallet-linked (their own credential relationship with
+    // OzmiumIssuer, distinct from their berlinSpv one in the onboarding
+    // scenario) -- all before settle needs any of it.
+    "linkIssuerWallet", "onboardHolders", "linkHolderWallets",
     "settle", "markPaid", "markPaid2",
   ],
   licensing: [
@@ -62,9 +70,12 @@ const STEP_TEXT = {
   entitlement: "Calculate entitlement",
   allocate: "Create allocation table (SAFT cap table + vesting schedule)",
   release: "Calculate vested entitlement (release)",
+  linkIssuerWallet: "Link issuer treasury wallet (real DFNS wallet)",
+  onboardHolders: "Onboard both SAFT holders under OzmiumIssuer",
+  linkHolderWallets: "Link both holders' Canton PartyIDs to real DFNS wallets",
   settle: "Settle",
-  markPaid: "Mark first payment paid",
-  markPaid2: "Mark second payment paid",
+  markPaid: "Mark first payment paid (real DFNS CIP-56 transfer)",
+  markPaid2: "Mark second payment paid (real DFNS CIP-56 transfer)",
   markPaid3: "Mark third payment paid",
   attestFirst: "Attest revenue (period 1, attestor licensed)",
   validateFirst: "Validate (expect success — licensed)",

@@ -59,6 +59,11 @@ export default function Card({ stageKey, ev }) {
         ["Amount", money(a.amount, a.currency)],
         ["Status", a.status],
         ["Source", a.sourceEventRef],
+        // Week 4 -- present once a real DFNS CIP-56 transfer backed this
+        // payout (the SAFT/vesting path); None/absent for scenarios that
+        // don't have DFNS wallets wired up, same as it was implicitly
+        // before this field existed.
+        ["DFNS transfer", a.dfnsTransferId || "— (not DFNS-settled)"],
       ];
       break;
     case "distributionReport": {

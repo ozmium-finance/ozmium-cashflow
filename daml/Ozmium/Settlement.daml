@@ -1,12 +1,16 @@
 -- | Checkpoint 4 — settlement.
 --
 -- SettlementInstruction is just the fund's obligation to pay a holder a
--- specific amount for a specific event, written on-ledger. No real money
--- moves here — the build guide only asks for the obligation to exist
--- on-ledger, not an actual payout rail. In a real build this is the spot
--- where you'd trigger a DvP payout on Hedera or wherever the token
--- happens to live — Canton's job is orchestrating the money, not caring
--- which chain the token was issued on.
+-- specific amount for a specific event, written on-ledger. Week 4 wires
+-- the actual payout rail: DFNS's native CIP-56 support (Canton's token
+-- standard) executes the real transfer off-ledger, and
+-- Settlement_MarkPaid now carries that transfer's id back onto the
+-- ledger as proof, instead of being a bare unbacked flip. Canton's job
+-- is still just orchestrating the money, not caring which chain the
+-- token happens to live on -- dfnsTransferId is deliberately just an
+-- opaque reference (DFNS's transfer id, itself resolvable to a Canton
+-- tx hash via GET /wallets/{walletId}/transfers/{transferId}), not a
+-- new payout data model living here.
 --
 -- No contract key on this one either. Whoever needs a
 -- SettlementInstruction gets its ContractId back from
@@ -31,17 +35,33 @@ template SettlementInstruction
     -- can trace a payout all the way back to the event that caused it.
     sourceEventRef : Text
     status         : SettlementStatus
+    -- DFNS transfer id once a real CIP-56 transfer has executed this
+    -- payout (see dashboard/lib/dfnsServer.js's transferCip56Asset).
+    -- None for the demo paths that don't have DFNS wallets wired up yet
+    -- (the waterfall/rent scenarios) -- only the SAFT/vesting path
+    -- populates this today. Kept as a plain field rather than its own
+    -- template so the audit trail (Ozmium.Reporting, dashboard/pages/
+    -- audit.js) can read it straight off the Paid contract without a
+    -- second lookup.
+    dfnsTransferId : Optional Text
   where
     signatory fund
     observer holder
 
     ensure amount > 0.0
 
-    -- Flip to Paid once the actual transfer has happened, off-ledger.
-    -- Fund-controlled for now; you'd probably want the holder or some
+    -- Flip to Paid once the actual transfer has happened. Fund-
+    -- controlled for now; you'd probably want the holder or some
     -- payment oracle to co-sign this in a real deployment so the fund
-    -- can't just mark things paid without anyone checking.
+    -- can't just mark things paid without anyone checking -- that's
+    -- still true even with a real dfnsTransferId attached, since
+    -- nothing here stops the fund from passing a bogus or unrelated id.
+    -- The caller (dashboard's markSettlementPaid step) is expected to
+    -- have already gotten a real DFNS transfer id back before exercising
+    -- this; Daml itself has no way to call out to DFNS and verify it.
     choice Settlement_MarkPaid : ContractId SettlementInstruction
+      with
+        dfnsTransferId : Optional Text
       controller fund
       do
-        create this with status = Paid
+        create this with status = Paid, dfnsTransferId

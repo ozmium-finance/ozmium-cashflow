@@ -79,6 +79,7 @@ template EntitlementCalculation
             amount = l.amount
             sourceEventRef = sourceRef
             status = Pending
+            dfnsTransferId = None
 
 -- | Same math as the choice above, just pulled out as a plain function so
 -- tests can check it directly instead of going through a ledger

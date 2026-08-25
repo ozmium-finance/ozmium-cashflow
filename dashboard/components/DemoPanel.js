@@ -10,6 +10,7 @@ import { SETUP_TEMPLATES, PKG } from "../lib/stages";
 import { money } from "../lib/format";
 import {
   submitCommand, getOrAllocateParty, knownCidsFor, findNewContracts, createDfnsWallet,
+  getDfnsWallet, transferCip56Asset,
 } from "../lib/api";
 
 // Strictly sequential within one scenario's run: exactly one button is
@@ -309,18 +310,181 @@ export default function DemoPanel() {
     // allSettlementCids is the full set, kept around for the report
     // steps below -- settlementCids itself gets drained to nothing by
     // markNextSettlementPaid as each one gets marked Paid.
-    dispatch(setRunField({ scenario: scenarioKey, fields: { settlementCids, allSettlementCids: settlementCids } }));
+    //
+    // settlementDetails additionally keeps each instruction's holder/
+    // amount around, read straight off the createdEvent -- the vesting/
+    // SAFT path needs both to actually call DFNS (which wallet, how
+    // much), and there's no cheap way to re-derive them from a bare
+    // contractId later without a second ledger round trip.
+    const settlementDetails = created.map((ev) => ({
+      contractId: ev.contractId,
+      holder: ev.createArgument?.holder,
+      amount: ev.createArgument?.amount,
+    }));
+    dispatch(setRunField({ scenario: scenarioKey, fields: { settlementCids, allSettlementCids: settlementCids, settlementDetails } }));
     log(`${created.length} settlement instruction(s) created — pending payment`);
+  }
+
+  // CIP-56/DFNS groundwork for the issuer side -- the fund's own
+  // treasury wallet, real DFNS-custodied CantonTestnet wallet, same
+  // createDfnsWallet call the investor-side steps already use. Nothing
+  // AddressBookEntry-shaped here: that template exists to gate an
+  // *investor's* wallet behind their compliance credential, but the
+  // issuer isn't onboarding themselves, so this just stores the wallet
+  // id directly in run state -- same role DFNS_ISSUER_WALLET_ID plays
+  // as a static config fallback for a non-demo deployment.
+  async function stepLinkIssuerWallet() {
+    const { ozmiumIssuer } = demo.parties;
+    const scenarioKey = demo.scenarioValue;
+    const wallet = await createDfnsWallet("ozmium-issuer-treasury", ozmiumIssuer);
+    if (!wallet?.id) throw new Error("DFNS wallet creation succeeded but returned no wallet id");
+    dispatch(setRunField({ scenario: scenarioKey, fields: { issuerWalletId: wallet.id } }));
+    log(`Issuer treasury DFNS wallet created — ${wallet.id} (${wallet.network}), address ${wallet.address}`);
+  }
+
+  // Onboards both SAFT holders under ozmiumIssuer as fund -- separate
+  // from (and not reusable with) the onboarding scenario's Alice/Bob
+  // credentials, which are scoped to berlinSpv. A credential's approval
+  // is a statement about one specific issuer/investor relationship, not
+  // a portable global "this person is KYC'd" flag, so the SAFT case
+  // needs its own, even though it happens to be the same two underlying
+  // parties. Bundled into one step (propose + approve, both holders)
+  // rather than four separate buttons -- same "setup bundles multiple
+  // creates" reasoning as stepSetup, since there's no interesting
+  // rejected-path branch to demonstrate here the way the onboarding
+  // scenario's Bob is for.
+  async function stepOnboardHolders() {
+    const { admin, ozmiumIssuer, investor1, investor2 } = demo.parties;
+    const scenarioKey = demo.scenarioValue;
+
+    async function onboardApproved(investor) {
+      const known = await knownCidsFor("Ozmium.Investor:InvestorCredential");
+      await submitCommand(investor, [{
+        CreateCommand: {
+          templateId: `${PKG}:Ozmium.Investor:InvestorOnboardingRequest`,
+          createArguments: {
+            investor, fund: ozmiumIssuer, admin,
+            submittedOn: "2026-08-05",
+            applicationNotes: "SAFT holder — settlement wiring",
+          },
+        },
+      }]);
+      const [request] = await findNewContracts("Ozmium.Investor:InvestorOnboardingRequest", known);
+      if (!request?.contractId) throw new Error("InvestorOnboardingRequest created but couldn't be found afterward");
+
+      const knownCred = await knownCidsFor("Ozmium.Investor:InvestorCredential");
+      await submitCommand(admin, [{
+        ExerciseCommand: {
+          templateId: `${PKG}:Ozmium.Investor:InvestorOnboardingRequest`,
+          contractId: request.contractId,
+          choice: "InvestorOnboardingRequest_Approve",
+          choiceArgument: { effectiveOn: "2026-08-05", notes: "Approved for OZM SAFT settlement" },
+        },
+      }]);
+      const [credential] = await findNewContracts("Ozmium.Investor:InvestorCredential", knownCred);
+      if (!credential?.contractId) throw new Error("InvestorOnboardingRequest_Approve succeeded but the credential couldn't be found afterward");
+      return credential.contractId;
+    }
+
+    const investor1CredentialCid = await onboardApproved(investor1);
+    log("Alice approved as an OZM SAFT holder under OzmiumIssuer");
+    const investor2CredentialCid = await onboardApproved(investor2);
+    log("Bob approved as an OZM SAFT holder under OzmiumIssuer");
+
+    dispatch(setRunField({ scenario: scenarioKey, fields: { investor1CredentialCid, investor2CredentialCid } }));
+  }
+
+  // Real DFNS wallets for both SAFT holders, linked via the same
+  // AddressBookEntry mechanism the onboarding scenario demonstrates --
+  // this is exactly the reusable seam Ozmium.AddressBook's own comment
+  // describes, now actually reused by a second, independent flow instead
+  // of only ever being exercised by the scenario that introduced it.
+  async function stepLinkHolderWallets() {
+    const { admin, investor1, investor2 } = demo.parties;
+    const scenarioKey = demo.scenarioValue;
+
+    async function linkWallet(investor, investorCredentialCid, label) {
+      const known = await knownCidsFor("Ozmium.AddressBook:AddressBookEntry");
+      const wallet = await createDfnsWallet(`ozmium-saft-${label}`, investor);
+      if (!wallet?.id) throw new Error("DFNS wallet creation succeeded but returned no wallet id");
+      await submitCommand(admin, [{
+        ExerciseCommand: {
+          templateId: `${PKG}:Ozmium.Investor:InvestorCredential`,
+          contractId: investorCredentialCid,
+          choice: "InvestorCredential_LinkDfnsWallet",
+          choiceArgument: { effectiveOn: "2026-08-05", dfnsWalletId: wallet.id, linkNotes: "SAFT settlement wallet" },
+        },
+      }]);
+      const [entry] = await findNewContracts("Ozmium.AddressBook:AddressBookEntry", known);
+      if (!entry?.contractId) throw new Error("InvestorCredential_LinkDfnsWallet succeeded but the AddressBookEntry couldn't be found afterward");
+      return { addressBookCid: entry.contractId, walletId: wallet.id };
+    }
+
+    const alice = await linkWallet(investor1, run.investor1CredentialCid, "alice");
+    log(`Alice's SAFT wallet linked — ${alice.walletId}`);
+    const bob = await linkWallet(investor2, run.investor2CredentialCid, "bob");
+    log(`Bob's SAFT wallet linked — ${bob.walletId}`);
+
+    dispatch(setRunField({
+      scenario: scenarioKey,
+      fields: {
+        investor1AddressBookCid: alice.addressBookCid, investor1WalletId: alice.walletId,
+        investor2AddressBookCid: bob.addressBookCid, investor2WalletId: bob.walletId,
+      },
+    }));
   }
 
   // Marks whichever settlement is still first in run.settlementCids as
   // Paid, then drops it -- calling this repeatedly (steps 7/8/9 for the
   // waterfall's 3 investors, or 4/5 for the vesting scenario's 2) walks
   // through each holder one at a time.
+  //
+  // Week 4: for the vesting/SAFT scenario specifically, this now does
+  // the real settlement rail first -- a DFNS CIP-56 transfer from the
+  // issuer's treasury wallet to the holder's linked wallet -- and only
+  // marks Paid once that call returns a real transfer id, instead of a
+  // bare unbacked flip. The waterfall/rent scenarios don't have wallets
+  // wired up at all, so they keep passing dfnsTransferId = null, same
+  // as this choice always effectively did before Settlement.daml grew
+  // that field.
   async function markNextSettlementPaid(ordinal) {
     const scenarioKey = demo.scenarioValue;
+    const kind = SCENARIOS[scenarioKey].kind;
     const { entitlementFund } = run;
     const cid = run.settlementCids[0];
+
+    let dfnsTransferId = null;
+    if (kind === "vesting") {
+      const { investor1, investor2 } = demo.parties;
+      const detail = (run.settlementDetails || []).find((d) => d.contractId === cid);
+      if (!detail) throw new Error(`No settlement detail recorded for ${cid} -- did the Settle step run in this same session?`);
+
+      const isAlice = detail.holder === investor1;
+      const holderLabel = isAlice ? "Alice" : "Bob";
+      const holderWalletId = isAlice ? run.investor1WalletId : run.investor2WalletId;
+      if (!holderWalletId) throw new Error(`No DFNS wallet linked for ${holderLabel} yet -- run "Link holder wallets" first`);
+      if (!run.issuerWalletId) throw new Error('No issuer treasury wallet yet -- run "Link issuer wallet" first');
+
+      // Resolve the holder's current address live rather than trusting
+      // anything cached from link time -- same reasoning as
+      // getCantonTestnetWallet's own comment in lib/dfnsServer.js.
+      const wallet = await getDfnsWallet(holderWalletId);
+      if (!wallet?.address) throw new Error(`DFNS wallet ${holderWalletId} has no address on record`);
+
+      log(`Submitting DFNS CIP-56 transfer — ${detail.amount} OZM, issuer wallet → ${holderLabel}'s wallet (${wallet.address})`);
+      const transfer = await transferCip56Asset({
+        walletId: run.issuerWalletId,
+        to: wallet.address,
+        amount: detail.amount,
+        // Idempotency key -- retrying this exact settlement can never
+        // double-pay, DFNS itself enforces it against this id.
+        externalId: cid,
+      });
+      if (!transfer?.id) throw new Error("DFNS CIP-56 transfer call succeeded but returned no transfer id");
+      dfnsTransferId = transfer.id;
+      log(`DFNS transfer submitted — ${transfer.id} (status: ${transfer.status}${transfer.txHash ? `, tx ${transfer.txHash}` : ""})`);
+    }
+
     // Settlement_MarkPaid is consuming -- it archives `cid` and creates
     // a new contract (new id) in Paid status. allSettlementCids has to
     // track that replacement, not just the original Pending id, since
@@ -335,7 +499,7 @@ export default function DemoPanel() {
         templateId: `${PKG}:Ozmium.Settlement:SettlementInstruction`,
         contractId: cid,
         choice: "Settlement_MarkPaid",
-        choiceArgument: {},
+        choiceArgument: { dfnsTransferId },
       },
     }]);
     const [paid] = await findNewContracts("Ozmium.Settlement:SettlementInstruction", known);
@@ -840,6 +1004,9 @@ export default function DemoPanel() {
     entitlement: stepEntitlement,
     allocate: stepAllocate,
     release: stepRelease,
+    linkIssuerWallet: stepLinkIssuerWallet,
+    onboardHolders: stepOnboardHolders,
+    linkHolderWallets: stepLinkHolderWallets,
     settle: stepSettle,
     markPaid: () => markNextSettlementPaid("First"),
     markPaid2: () => markNextSettlementPaid("Second"),

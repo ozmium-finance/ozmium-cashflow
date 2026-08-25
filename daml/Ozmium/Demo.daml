@@ -130,8 +130,9 @@ runFullDemo = do
 
   let (firstSettlementCid :: _) = settlementCids
   paidCid <- submit berlinSpv do
-    exerciseCmd firstSettlementCid Settlement_MarkPaid
+    exerciseCmd firstSettlementCid Settlement_MarkPaid with dfnsTransferId = None
   debug ("First settlement marked Paid, once the actual transfer confirms off-ledger. Id: " <> show paidCid)
+  debug "(This walkthrough's rent scenario has no DFNS wallets wired up, so dfnsTransferId is None here -- see the SAFT/vesting demo path in the dashboard for a settlement backed by a real DFNS CIP-56 transfer.)"
   debug ""
 
   debug "=== Done. Attestation -> validation -> distribution decision -> entitlement -> settlement, auditable end to end, running on Canton. ==="
