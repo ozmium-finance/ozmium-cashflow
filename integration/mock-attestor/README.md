@@ -24,7 +24,7 @@ dpm script \
 Start a sandbox first, in another terminal, from the repo root:
 
 ```bash
-dpm sandbox --dar .daml/dist/ozmium-cashflow-0.1.0.dar --json-api-port 7575
+dpm sandbox --dar .daml/dist/ozmium-cashflow-0.2.0.dar --json-api-port 7575
 ```
 
 `getOrAllocateParty` in `MockAttestor.daml` looks for `PropManagerCo`/

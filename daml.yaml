@@ -9,10 +9,20 @@
 # sdk-version below was the latest stable as of writing (June 2026) —
 # double check with `dpm sdk list` since I couldn't hit
 # get.digitalasset.com from here to confirm it.
+# version bumped 0.1.0 -> 0.2.0 for the Week 4 CIP-56/DFNS settlement
+# change (Settlement.daml grew a field, Settlement_MarkPaid's signature
+# changed) -- v0.1.0 was already vetted on devnet, and Canton rejects
+# uploading a different package hash under a name+version that's
+# already known (KNOWN_PACKAGE_VERSION). Every place that references
+# the literal ozmium-cashflow-0.1.0.dar filename had to move to
+# -0.2.0.dar alongside this -- see deploy.yml, both data-dependencies in
+# tests/scenarios and integration/mock-attestor, and the READMEs.
+# Bump this again next time a template/choice shape changes, not just
+# when it feels like a new release.
 sdk-version: 3.5.2
 name: ozmium-cashflow
 source: daml
-version: 0.1.0
+version: 0.2.0
 dependencies:
   - daml-prim
   - daml-stdlib

@@ -1,6 +1,6 @@
 -- | Allocates demo parties and seeds a bit of starting data. Doesn't
 -- run automatically — fire it against a live sandbox yourself:
---   dpm script --dar .daml/dist/ozmium-cashflow-0.1.0.dar \
+--   dpm script --dar .daml/dist/ozmium-cashflow-0.2.0.dar \
 --     --script-name Ozmium.Setup:setup \
 --     --ledger-host localhost --ledger-port 6865
 -- (Old Daml 2.x `daml start` used to run an init-script for you

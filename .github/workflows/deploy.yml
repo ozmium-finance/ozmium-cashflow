@@ -54,7 +54,7 @@ jobs:
       - name: Upload DAR to devnet
         run: |
           id=$(docker create "${{ vars.SCW_REGISTRY }}/canton:${{ steps.tag.outputs.value }}")
-          docker cp "$id":/app/.daml/dist/ozmium-cashflow-0.1.0.dar ./ozmium-cashflow.dar
+          docker cp "$id":/app/.daml/dist/ozmium-cashflow-0.2.0.dar ./ozmium-cashflow.dar
           docker rm "$id" > /dev/null
 
           token_response=$(curl -sS -X POST "${{ vars.LEDGER_API_TOKEN_URL }}" \
