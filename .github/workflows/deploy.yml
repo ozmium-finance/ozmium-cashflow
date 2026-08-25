@@ -143,6 +143,10 @@ jobs:
           DFNS_CREDENTIAL_ID=${{ secrets.DFNS_CREDENTIAL_ID }}
           DFNS_ORG_ID=${{ vars.DFNS_ORG_ID }}
           DFNS_API_URL=${{ vars.DFNS_API_URL }}
+          DFNS_ISSUER_WALLET_ID=${{ vars.DFNS_ISSUER_WALLET_ID }}
+          DFNS_OZM_INSTRUMENT_ID=${{ vars.DFNS_OZM_INSTRUMENT_ID }}
+          DFNS_OZM_INSTRUMENT_ADMIN=${{ vars.DFNS_OZM_INSTRUMENT_ADMIN }}
+          DFNS_OZM_DECIMALS=${{ vars.DFNS_OZM_DECIMALS }}
           EOF
 
       - name: Stop the old stack
@@ -247,3 +251,15 @@ jobs:
 #    demo site no longer starts from a guaranteed-empty ledger on every
 #    deploy the way it used to. Whatever state exists under these parties
 #    on devnet is what visitors will see.
+#
+# 5. Week 4 -- real CIP-56 settlement (SAFT/vesting scenario). Add these
+#    under Settings -> Secrets and variables -> Actions -> Variables (not
+#    Secrets -- none of these four are credentials, just public on-ledger
+#    identifiers and a wallet id): DFNS_ISSUER_WALLET_ID,
+#    DFNS_OZM_INSTRUMENT_ID, DFNS_OZM_INSTRUMENT_ADMIN, DFNS_OZM_DECIMALS.
+#    Same values dashboard/.env.local.example documents for local dev --
+#    DFNS_OZM_INSTRUMENT_ID/ADMIN are already confirmed real values there,
+#    DFNS_ISSUER_WALLET_ID and DFNS_OZM_DECIMALS are still open (see that
+#    file's comments for why). Until these are set, transfer-cip56.js
+#    will 400 with a clear "not configured" error rather than fail
+#    silently -- that's expected, not a bug, until the wallet is funded.

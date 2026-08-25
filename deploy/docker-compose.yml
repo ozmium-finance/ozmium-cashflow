@@ -86,6 +86,15 @@ services:
       DFNS_CREDENTIAL_ID: ${DFNS_CREDENTIAL_ID}
       DFNS_ORG_ID: ${DFNS_ORG_ID}
       DFNS_API_URL: ${DFNS_API_URL}
+      # Week 4 -- real CIP-56 settlement (pages/api/dfns/transfer-cip56.js).
+      # None of these four are secret in the credential sense (they're
+      # public on-ledger identifiers / a wallet id, not private keys), so
+      # they come from GitHub Variables rather than Secrets -- see the
+      # "one-time setup" comment block at the bottom of deploy.yml.
+      DFNS_ISSUER_WALLET_ID: ${DFNS_ISSUER_WALLET_ID}
+      DFNS_OZM_INSTRUMENT_ID: ${DFNS_OZM_INSTRUMENT_ID}
+      DFNS_OZM_INSTRUMENT_ADMIN: ${DFNS_OZM_INSTRUMENT_ADMIN}
+      DFNS_OZM_DECIMALS: ${DFNS_OZM_DECIMALS}
     expose:
       - "3000"
 
