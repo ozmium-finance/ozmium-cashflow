@@ -1,9 +1,18 @@
 name: Deploy
 
-# Runs on every push to main (i.e. every merge). Two jobs:
-#   1. build-and-push -- builds both images, pushes to Scaleway Container
-#      Registry. Runs immediately, no gate.
-#   2. deploy -- SSHes into the Scaleway Instance and restarts the stack
+# Runs on every push to main (i.e. every merge). Three jobs:
+#   1. test -- runs the Checkpoint*.daml suite under tests/scenarios.
+#      Gates everything else: `dpm build` succeeding only proves the
+#      package compiles, it says nothing about whether e.g. ProofLog's
+#      verifyChain actually catches tampering -- that's what the tests
+#      check, and until this job existed nothing in CI ran them at all
+#      (found the hard way: the Week 5 ProofLog build broke on a
+#      DAML-LF recursion restriction that `dpm build` alone wouldn't
+#      have caught either, but the *logic* could just as easily have
+#      been silently wrong and shipped anyway).
+#   2. build-and-push -- builds both images, pushes to Scaleway Container
+#      Registry. Only runs once `test` passes.
+#   3. deploy -- SSHes into the Scaleway Instance and restarts the stack
 #      with the new images. Gated by the "production" GitHub Environment
 #      below, so it pauses for a manual approval before running -- see
 #      the note at the bottom of this file for the one-time setup step
@@ -13,7 +22,43 @@ on:
     branches: [main]
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      DPM_HOME: /home/runner/dpm
+    steps:
+      - uses: actions/checkout@v4
+
+      # JDK 17+ on JAVA_HOME per Digital Asset's dpm prerequisites --
+      # same requirement Dockerfile.canton documents. setup-java sets
+      # JAVA_HOME for us; Dockerfile.canton uses apt/curl directly
+      # instead since it's not a GitHub Actions runner.
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install dpm
+        run: |
+          curl -sSL https://get.digitalasset.com/install/install.sh | sh
+          echo "${DPM_HOME}/bin" >> "$GITHUB_PATH"
+
+      # Build order matters -- tests/scenarios/daml.yaml pulls in the
+      # root package via data-dependencies on the built .dar, same as
+      # Dockerfile.canton's `dpm install package && dpm build`.
+      - name: Build root package
+        run: |
+          dpm install package
+          dpm build
+
+      - name: Run Checkpoint test suite
+        run: |
+          cd tests/scenarios
+          dpm test
+
   build-and-push:
+    needs: test
     runs-on: ubuntu-latest
     outputs:
       image_tag: ${{ steps.tag.outputs.value }}
