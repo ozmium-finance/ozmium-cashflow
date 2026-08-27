@@ -6,7 +6,7 @@
 #   1. repo root:        dpm build
 #   2. this directory:   dpm test
 #
-# Step 1 has to happen first, otherwise ../../.daml/dist/ozmium-cashflow-0.2.0.dar
+# Step 1 has to happen first, otherwise ../../.daml/dist/ozmium-cashflow-0.3.0.dar
 # doesn't exist yet and the data-dependency below can't resolve. Bump the
 # version in the root daml.yaml and you'll need to update that filename
 # too. (Or just run `dpm build --all` from the repo root and skip doing
@@ -20,4 +20,4 @@ dependencies:
   - daml-stdlib
   - daml-script
 data-dependencies:
-  - ../../.daml/dist/ozmium-cashflow-0.2.0.dar
+  - ../../.daml/dist/ozmium-cashflow-0.3.0.dar

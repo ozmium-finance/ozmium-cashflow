@@ -127,10 +127,10 @@ script for you automatically:
 
 ```bash
 # terminal 1
-dpm sandbox --dar .daml/dist/ozmium-cashflow-0.2.0.dar --json-api-port 7575
+dpm sandbox --dar .daml/dist/ozmium-cashflow-0.3.0.dar --json-api-port 7575
 
 # terminal 2, once the sandbox is up
-dpm script --dar .daml/dist/ozmium-cashflow-0.2.0.dar \
+dpm script --dar .daml/dist/ozmium-cashflow-0.3.0.dar \
   --script-name Ozmium.Setup:setup \
   --ledger-host localhost --ledger-port 6865
 ```
@@ -179,7 +179,7 @@ above, which is this project's own dedicated deployment.
    whoever's running the shared Canton testnet early — the Dev Build
    Guide is right to flag this as something you don't want to leave
    until the last day.
-2. `dpm build` to get `.daml/dist/ozmium-cashflow-0.2.0.dar`.
+2. `dpm build` to get `.daml/dist/ozmium-cashflow-0.3.0.dar`.
 3. Upload it to the target participant. Check `dpm --help` or your
    participant's own docs for the current upload command — this is
    where Daml 2.x's `daml ledger upload-dar` used to live.

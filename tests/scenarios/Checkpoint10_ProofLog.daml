@@ -1,0 +1,104 @@
+-- | Week 5 — hash-chained proof log. "Doesn't need to be elaborate,
+-- needs to be demonstrably tamper-evident" per the brief -- this
+-- checkpoint is exactly that demonstration.
+--
+-- Done when: appending builds a real chain (each entryHash a function
+-- of the previous one), verifyChain accepts a genuine chain, and
+-- verifyChain rejects a chain with any single entry tampered with --
+-- proving the "demonstrably" part, not just the happy path.
+module Checkpoint10_ProofLog where
+
+import DA.Assert
+import Daml.Script
+import Ozmium.ProofLog
+import Ozmium.Setup
+
+test_appendBuildsAHashChain : Script ()
+test_appendBuildsAHashChain = script do
+  DemoParties{..} <- allocateDemoParties
+
+  logCid <- submit berlinSpv do
+    createCmd ProofLog with operator = berlinSpv, lastHash = "", entryCount = 0
+
+  (logCid1, entry1Cid) <- submit berlinSpv do
+    exerciseCmd logCid ProofLog_Append with
+      eventRef = "settlement-alice-2026-07"
+      payloadHash = "aaaa"
+
+  Some entry1 <- queryContractId berlinSpv entry1Cid
+  entry1.sequenceNo === 0
+  entry1.previousHash === ""
+  entry1.entryHash === nextEntryHash "" "settlement-alice-2026-07" "aaaa"
+
+  Some log1 <- queryContractId berlinSpv logCid1
+  log1.entryCount === 1
+  log1.lastHash === entry1.entryHash
+
+  (logCid2, entry2Cid) <- submit berlinSpv do
+    exerciseCmd logCid1 ProofLog_Append with
+      eventRef = "settlement-bob-2026-07"
+      payloadHash = "bbbb"
+
+  Some entry2 <- queryContractId berlinSpv entry2Cid
+  entry2.sequenceNo === 1
+  -- the real chaining property: entry 2's previousHash is entry 1's
+  -- entryHash, not "" and not something entry 2 made up independently
+  entry2.previousHash === entry1.entryHash
+  entry2.entryHash === nextEntryHash entry1.entryHash "settlement-bob-2026-07" "bbbb"
+
+  Some log2 <- queryContractId berlinSpv logCid2
+  log2.entryCount === 2
+  log2.lastHash === entry2.entryHash
+
+  -- and the whole thing replays clean from genesis
+  verifyChain [entry1, entry2] === True
+
+test_verifyChainCatchesEachKindOfTampering : Script ()
+test_verifyChainCatchesEachKindOfTampering = script do
+  DemoParties{..} <- allocateDemoParties
+
+  logCid <- submit berlinSpv do
+    createCmd ProofLog with operator = berlinSpv, lastHash = "", entryCount = 0
+  (logCid1, entry1Cid) <- submit berlinSpv do
+    exerciseCmd logCid ProofLog_Append with
+      eventRef = "settlement-alice-2026-07"
+      payloadHash = "aaaa"
+  Some entry1 <- queryContractId berlinSpv entry1Cid
+  (_, entry2Cid) <- submit berlinSpv do
+    exerciseCmd logCid1 ProofLog_Append with
+      eventRef = "settlement-bob-2026-07"
+      payloadHash = "bbbb"
+  Some entry2 <- queryContractId berlinSpv entry2Cid
+
+  -- genuine chain: passes
+  verifyChain [entry1, entry2] === True
+
+  -- swap the committed payload after the fact without touching
+  -- entryHash -- this is exactly the attack the whole module exists to
+  -- catch (someone quietly changing what a past commitment pointed to)
+  let tamperedPayload = entry1 with payloadHash = "zzzz-forged"
+  verifyChain [tamperedPayload, entry2] === False
+
+  -- drop the genesis entry and pretend entry2 came first -- catches
+  -- reordering/deletion, not just single-entry forgery
+  verifyChain [entry2] === False
+
+  -- forge a plausible-looking but wrong entryHash directly
+  let tamperedHash = entry1 with entryHash = "0000000000000000000000000000000000000000000000000000000000000000"
+  verifyChain [tamperedHash, entry2] === False
+
+test_onlyOperatorCanAppend : Script ()
+test_onlyOperatorCanAppend = script do
+  DemoParties{..} <- allocateDemoParties
+
+  logCid <- submit berlinSpv do
+    createCmd ProofLog with operator = berlinSpv, lastHash = "", entryCount = 0
+
+  -- investor1 isn't a stakeholder on the log at all, so this fails on
+  -- visibility grounds before controller-checking even gets involved --
+  -- same "not just wrong, invisible" property Ozmium.Investor's
+  -- InvestorOnboardingRequest comment flags for admin/observer shape.
+  submitMustFail investor1 do
+    exerciseCmd logCid ProofLog_Append with
+      eventRef = "forged-entry"
+      payloadHash = "cccc"

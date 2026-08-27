@@ -19,10 +19,10 @@ fine to run on a completely fresh sandbox — no need to run
 ```bash
 # terminal 1
 dpm build
-dpm sandbox --dar .daml/dist/ozmium-cashflow-0.2.0.dar --json-api-port 7575
+dpm sandbox --dar .daml/dist/ozmium-cashflow-0.3.0.dar --json-api-port 7575
 
 # terminal 2, once the sandbox is up
-dpm script --dar .daml/dist/ozmium-cashflow-0.2.0.dar \
+dpm script --dar .daml/dist/ozmium-cashflow-0.3.0.dar \
   --script-name Ozmium.Demo:runFullDemo \
   --ledger-host localhost --ledger-port 6865
 ```

@@ -13,4 +13,4 @@ dependencies:
   - daml-stdlib
   - daml-script
 data-dependencies:
-  - ../../.daml/dist/ozmium-cashflow-0.2.0.dar
+  - ../../.daml/dist/ozmium-cashflow-0.3.0.dar

@@ -1,0 +1,153 @@
+-- | Week 5/6 — "verifiability without disclosure." Per the Mission 2
+-- brief: a hash-chained proof log, doesn't need to be elaborate, needs
+-- to be demonstrably tamper-evident. This is the "start it" half of
+-- Week 5 -- per-investor statements and the public verification page
+-- that consume this (Week 6) come later.
+--
+-- The design goal is specific: someone should be able to take a single
+-- private statement (an investor's own settlement record, say) plus
+-- this log's public entries, and independently confirm two things
+-- without ever seeing anyone else's private data:
+--   1. the commitment for their own event hasn't been altered, and
+--   2. that commitment's place in the sequence hasn't been tampered
+--      with -- no entry quietly swapped, reordered, or dropped after
+--      the fact.
+--
+-- (1) is just "does sha256(their real record) match payloadHash for
+-- their eventRef" -- doesn't need anything in this module, just their
+-- own data and a hash function, computed entirely client-side.
+-- (2) is what this module actually provides: entryHash is computed
+-- on-ledger (DA.Crypto.Text.sha256, a real primitive every validating
+-- node re-executes, not a string the caller hands in and everyone
+-- trusts blindly) as a function of the previous entry's hash --
+-- exactly a hash chain. Altering, reordering, or deleting any past
+-- entry changes every entryHash after it, which anyone can catch by
+-- replaying the chain from genesis themselves (verifyChain below is
+-- written as a plain function precisely so the eventual public
+-- verification page can run the identical check client-side, not just
+-- trust a server that says "looks fine").
+--
+-- payloadHash is deliberately opaque to this module -- it's a
+-- commitment to private data ProofLog never sees, not something it
+-- re-derives. That's the "without disclosure" half: the chain proves
+-- sequence integrity of commitments, not the underlying facts
+-- themselves, which is exactly the split the brief asks for.
+module Ozmium.ProofLog where
+
+import DA.Crypto.Text (sha256, toHex)
+
+-- | One link in the chain. Never archived/consumed once created --
+-- unlike everything else in this codebase (Settlement, Entitlement,
+-- ...) a log's whole point is that old entries stay around forever,
+-- so a plain active-contracts query returns the complete history
+-- without needing the archived-contract history trick audit.js uses
+-- for the settlement pipeline.
+template ProofLogEntry
+  with
+    operator     : Party
+    sequenceNo   : Int
+    -- "" only for the genesis entry (sequenceNo == 0). Every other
+    -- entry's previousHash is required to equal the prior entry's
+    -- entryHash -- enforced in ProofLog_Append below, not here, since
+    -- this template alone has no way to look up "the prior entry."
+    previousHash : Text
+    -- Public-safe pointer to whatever this entry is attesting to (a
+    -- SettlementInstruction's sourceEventRef, a report id, ...) --
+    -- deliberately NOT the private amount/holder itself.
+    eventRef     : Text
+    -- Commitment to the actual private record, computed by the caller
+    -- off-ledger from data this module never sees. ProofLog can't
+    -- verify this represents anything real -- what it guarantees is
+    -- that whatever commitment was submitted can't be silently
+    -- swapped out later without breaking the chain.
+    payloadHash  : Text
+    -- sha256(toHex(previousHash <> eventRef <> payloadHash)) --
+    -- computed on-ledger by ProofLog_Append, never accepted as a bare
+    -- field from a `create`. This template has no create-side
+    -- validation of that fact (Daml can't restrict who's allowed to
+    -- issue a raw createCmd the way it can gate a choice), so
+    -- ProofLogEntry is intentionally never created directly anywhere
+    -- in this codebase outside ProofLog_Append -- same convention as
+    -- AddressBookEntry only ever coming from
+    -- InvestorCredential_LinkDfnsWallet, see Ozmium.AddressBook.
+    entryHash    : Text
+  where
+    signatory operator
+
+-- | The running anchor -- one per operator, tracking chain state so
+-- ProofLog_Append always knows the real previousHash instead of
+-- trusting a caller-supplied one. Exactly one of these should be
+-- active per operator at a time (enforced by convention/the demo
+-- wiring, same as HoldingsSnapshot/AttestorRegistry having no contract
+-- key to enforce singleton-ness either -- see Ozmium.Entitlement's own
+-- comment on why contract keys aren't used anywhere in this codebase).
+template ProofLog
+  with
+    operator   : Party
+    lastHash   : Text  -- "" before the first entry
+    entryCount : Int
+  where
+    signatory operator
+
+    ensure entryCount >= 0
+
+    -- | Append one entry and advance the chain. Consuming + recreating
+    -- the anchor (new lastHash/entryCount) is the same "consuming
+    -- choice archives and replaces" shape Settlement_MarkPaid and
+    -- AddressBookEntry_Relink already use -- the caller gets back both
+    -- the new anchor id (to append again) and the entry id (to hand to
+    -- whoever needs to cite it later, e.g. a per-investor statement).
+    choice ProofLog_Append : (ContractId ProofLog, ContractId ProofLogEntry)
+      with
+        eventRef    : Text
+        payloadHash : Text
+      controller operator
+      do
+        let newHash = sha256 (toHex (lastHash <> eventRef <> payloadHash))
+        entryCid <- create ProofLogEntry with
+          operator
+          sequenceNo = entryCount
+          previousHash = lastHash
+          eventRef
+          payloadHash
+          entryHash = newHash
+        logCid <- create this with lastHash = newHash, entryCount = entryCount + 1
+        pure (logCid, entryCid)
+
+-- | Recomputes what sequenceNo `i`'s entryHash should be, given entry
+-- `i-1`'s already-verified hash -- the one step of the chain check,
+-- pulled out as a plain function for the same reason
+-- calculateEntitlementLines/vestedFraction are: testable directly, and
+-- reusable client-side by the eventual public verification page
+-- without needing a ledger submission just to check a hash.
+nextEntryHash : Text -> Text -> Text -> Text
+nextEntryHash previousHash eventRef payloadHash =
+  sha256 (toHex (previousHash <> eventRef <> payloadHash))
+
+-- | Replays a full chain from genesis and confirms every entry's
+-- entryHash is exactly what its previousHash/eventRef/payloadHash
+-- should produce, AND that each entry's previousHash actually matches
+-- the prior entry's entryHash (catches reordering/deletion, not just a
+-- single forged entry). Expects entries in sequence order starting at
+-- sequenceNo 0 -- the caller (dashboard or verification page) sorts by
+-- sequenceNo before calling this, same as Checkpoint4's own sortOn on
+-- settlements by holder.
+verifyChain : [ProofLogEntry] -> Bool
+verifyChain [] = True
+verifyChain (genesis :: rest) =
+  genesis.previousHash == "" &&
+  genesis.entryHash == nextEntryHash genesis.previousHash genesis.eventRef genesis.payloadHash &&
+  verifyChainStep genesis rest
+
+-- | The per-entry half of verifyChain, split out to the top level
+-- because it's recursive and DAML-LF's "Local variables defined
+-- recursively - recursion can only happen at the top level" rule means
+-- a `where go = ...` clause inside verifyChain can't self-recurse the
+-- way this needs to. Not meant to be called directly -- verifyChain
+-- always seeds it with the already-checked genesis entry.
+verifyChainStep : ProofLogEntry -> [ProofLogEntry] -> Bool
+verifyChainStep _ [] = True
+verifyChainStep prev (e :: es) =
+  e.previousHash == prev.entryHash &&
+  e.entryHash == nextEntryHash e.previousHash e.eventRef e.payloadHash &&
+  verifyChainStep e es

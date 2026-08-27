@@ -15,7 +15,7 @@
 --
 -- Run it with a sandbox up (see the root README's "How to run locally"
 -- section):
---   dpm script --dar .daml/dist/ozmium-cashflow-0.2.0.dar \
+--   dpm script --dar .daml/dist/ozmium-cashflow-0.3.0.dar \
 --     --script-name Ozmium.Demo:runFullDemo \
 --     --ledger-host localhost --ledger-port 6865
 --

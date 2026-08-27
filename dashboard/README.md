@@ -13,7 +13,7 @@ not page navigation) and wasn't what was breaking before.
 
 Needs Node.js 18+ and `dpm sandbox` running separately, same as before:
 
-    dpm sandbox --dar .daml/dist/ozmium-cashflow-0.2.0.dar --json-api-port 7575
+    dpm sandbox --dar .daml/dist/ozmium-cashflow-0.3.0.dar --json-api-port 7575
 
 Then, in this folder:
 
