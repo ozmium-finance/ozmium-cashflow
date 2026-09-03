@@ -54,7 +54,42 @@ export async function createCantonTestnetWallet({ name, externalId }) {
       externalId,
     },
   });
-  return wallet; // { id, network, address, status, ... }
+  // Per DFNS's own Canton docs: a freshly created wallet "has a key but is
+  // not yet registered on any validator. The wallet address will not have
+  // a prefix and the wallet cannot be used for transactions yet." Activate
+  // it immediately against DFNS_CANTON_VALIDATOR_ID so callers always get
+  // back a usable, fully-prefixed address -- without this, every wallet
+  // this app creates silently can't send or receive until someone notices
+  // and activates it by hand. If the validator isn't configured yet, fall
+  // back to returning the unactivated wallet rather than failing wallet
+  // creation outright -- this repo may still be waiting on BYOV setup.
+  if (process.env.DFNS_CANTON_VALIDATOR_ID) {
+    return activateCantonWallet({ walletId: wallet.id });
+  }
+  return wallet; // { id, network, address, status, ... } -- address has no prefix yet
+}
+
+// Registers a wallet on DFNS_CANTON_VALIDATOR_ID (the "Activate Wallet"
+// step DFNS's Canton docs describe as required before a wallet's address
+// carries its full "<hint>::1220<hash>" prefix and can send/receive at
+// all). Activation is asynchronous on DFNS's side, so this polls
+// getWallet afterward rather than trusting the activateWallet response --
+// that response is just a transaction id, not the updated wallet.
+export async function activateCantonWallet({ walletId }) {
+  const validatorId = process.env.DFNS_CANTON_VALIDATOR_ID;
+  if (!validatorId) {
+    throw new Error("DFNS_CANTON_VALIDATOR_ID isn't configured -- can't activate a Canton wallet without knowing which validator to register it on (see .env.local.example)");
+  }
+  await getDfnsClient().wallets.activateWallet({
+    walletId,
+    body: { validatorId },
+  });
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const wallet = await getDfnsClient().wallets.getWallet({ walletId });
+    if (wallet.address && wallet.address.includes("::")) return wallet;
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  throw new Error(`Wallet ${walletId} still has no fully-prefixed address ~15s after activation -- it may still be registering on the validator, try again shortly`);
 }
 
 // Looks up a wallet by id -- mainly to resolve its on-chain `address`,
@@ -63,8 +98,18 @@ export async function createCantonTestnetWallet({ name, externalId }) {
 // live rather than caching it anywhere on the Canton side keeps the
 // wallet's actual current address as the single source of truth --
 // there's no rotation story to keep in sync otherwise.
+//
+// Self-heals wallets created before activation was wired into
+// createCantonTestnetWallet above (or where activation never completed):
+// a bare, unprefixed address always fails DFNS's own destination-address
+// pattern on a real transfer, so activate on demand instead of leaving
+// that to surface downstream as a cryptic "Request body failed validation".
 export async function getCantonTestnetWallet(walletId) {
-  return getDfnsClient().wallets.getWallet({ walletId });
+  const wallet = await getDfnsClient().wallets.getWallet({ walletId });
+  if (wallet.address && !wallet.address.includes("::") && process.env.DFNS_CANTON_VALIDATOR_ID) {
+    return activateCantonWallet({ walletId });
+  }
+  return wallet;
 }
 
 // Week 4 -- the actual settlement rail. CIP-56 is Canton's own token
@@ -82,14 +127,33 @@ export async function getCantonTestnetWallet(walletId) {
 // SettlementInstruction's own contract id here means retrying a failed
 // or ambiguous call can never double-pay the same instruction, without
 // this app needing to invent its own dedupe bookkeeping.
+//
+// Per DFNS's Canton docs, a direct Cip56 transfer (offer: false, the
+// default) "settles immediately with no acceptance step, but only if the
+// recipient has a transfer pre-approval for that token. If they do not,
+// the request is rejected with a message to create an offer instead."
+// Pre-approving OZM requires broadcasting a raw Canton transaction against
+// the Registry Utility's own TransferPreapproval template -- template IDs
+// and field names this repo doesn't have configured, and specific to
+// whatever Registry Utility version issued OZM. Until that's wired up,
+// this always sends offer: true instead, then auto-accepts the resulting
+// offer server-side (both the issuer treasury wallet and every investor
+// wallet in this demo are DFNS-custodied under the same org, so nothing
+// stops this app from accepting on the recipient's behalf the same way a
+// human would click "Accept" on the DFNS dashboard).
 export async function transferCip56Asset({
   walletId,
   instrumentAdmin,
   instrumentId,
   to,
+  toWalletId,
   amount,
   externalId,
 }) {
+  // Self-heal the source wallet too -- DFNS won't let an unactivated
+  // wallet send at all, not just fail address-pattern validation on `to`.
+  await getCantonTestnetWallet(walletId);
+
   const transfer = await getDfnsClient().wallets.transferAsset({
     walletId,
     body: {
@@ -99,9 +163,34 @@ export async function transferCip56Asset({
       to,
       amount,
       externalId,
+      offer: true,
     },
   });
+
+  if (toWalletId) {
+    await acceptPendingCip56Offer({ walletId: toWalletId, to, amount });
+  }
+
   return transfer; // { id, status, txHash, ... } -- status starts Pending/Executing, not necessarily Confirmed yet
+}
+
+// Polls the recipient wallet's offers for the one this transfer just
+// created and accepts it. offer: true means the transfer doesn't settle
+// on its own -- DFNS docs: "the recipient explicitly accepts the offer."
+// listOffers doesn't take externalId/transfer id as a filter, so this
+// matches on destination address + amount among Pending offers, which is
+// unambiguous for this demo's one-settlement-at-a-time flow.
+async function acceptPendingCip56Offer({ walletId, to, amount }) {
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const { items } = await getDfnsClient().wallets.listOffers({ walletId, query: { limit: 20 } });
+    const match = (items || []).find((o) => o.status === "Pending" && o.to === to && o.value === amount);
+    if (match) {
+      await getDfnsClient().wallets.acceptOffer({ walletId, offerId: match.id });
+      return match.id;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  throw new Error(`CIP-56 transfer offer to ${to} for ${amount} never appeared in listOffers for wallet ${walletId} after ~12s -- it may need to be accepted manually via the DFNS dashboard`);
 }
 
 // SettlementInstruction.amount comes off the Canton ledger as a plain

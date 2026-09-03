@@ -161,8 +161,8 @@ export async function getDfnsWallet(walletId) {
 // back to the fund/treasury wallet and OZM's own CIP-56 identifiers
 // configured server-side (DFNS_ISSUER_WALLET_ID /
 // DFNS_OZM_INSTRUMENT_ID / DFNS_OZM_INSTRUMENT_ADMIN).
-export async function transferCip56Asset({ walletId, instrumentAdmin, instrumentId, to, amount, externalId }) {
-  return apiFetch("/dfns/transfer-cip56", { walletId, instrumentAdmin, instrumentId, to, amount, externalId });
+export async function transferCip56Asset({ walletId, instrumentAdmin, instrumentId, to, toWalletId, amount, externalId }) {
+  return apiFetch("/dfns/transfer-cip56", { walletId, instrumentAdmin, instrumentId, to, toWalletId, amount, externalId });
 }
 
 export function matchStage(templateId, stageTemplate) {

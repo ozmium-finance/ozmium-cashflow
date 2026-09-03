@@ -19,6 +19,7 @@ export default async function handler(req, res) {
       instrumentAdmin,
       instrumentId,
       to,
+      toWalletId,
       amount,
       externalId,
     } = req.body || {};
@@ -72,6 +73,7 @@ export default async function handler(req, res) {
       instrumentAdmin: resolvedInstrumentAdmin,
       instrumentId: resolvedInstrumentId,
       to,
+      toWalletId,
       amount: transferAmount,
       externalId,
     });

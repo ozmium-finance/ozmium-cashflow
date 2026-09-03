@@ -508,6 +508,7 @@ export default function DemoPanel() {
       const transfer = await transferCip56Asset({
         walletId: run.issuerWalletId,
         to: wallet.address,
+        toWalletId: holderWalletId,
         amount: detail.amount,
         // Idempotency key -- retrying this exact settlement can never
         // double-pay, DFNS itself enforces it against this id.

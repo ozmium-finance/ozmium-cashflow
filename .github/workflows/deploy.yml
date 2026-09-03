@@ -192,6 +192,7 @@ jobs:
           DFNS_OZM_INSTRUMENT_ID=${{ vars.DFNS_OZM_INSTRUMENT_ID }}
           DFNS_OZM_INSTRUMENT_ADMIN=${{ vars.DFNS_OZM_INSTRUMENT_ADMIN }}
           DFNS_OZM_DECIMALS=${{ vars.DFNS_OZM_DECIMALS }}
+          DFNS_CANTON_VALIDATOR_ID=${{ vars.DFNS_CANTON_VALIDATOR_ID }}
           EOF
 
       - name: Stop the old stack
@@ -299,12 +300,20 @@ jobs:
 #
 # 5. Week 4 -- real CIP-56 settlement (SAFT/vesting scenario). Add these
 #    under Settings -> Secrets and variables -> Actions -> Variables (not
-#    Secrets -- none of these four are credentials, just public on-ledger
+#    Secrets -- none of these five are credentials, just public on-ledger
 #    identifiers and a wallet id): DFNS_ISSUER_WALLET_ID,
-#    DFNS_OZM_INSTRUMENT_ID, DFNS_OZM_INSTRUMENT_ADMIN, DFNS_OZM_DECIMALS.
+#    DFNS_OZM_INSTRUMENT_ID, DFNS_OZM_INSTRUMENT_ADMIN, DFNS_OZM_DECIMALS,
+#    DFNS_CANTON_VALIDATOR_ID.
 #    Same values dashboard/.env.local.example documents for local dev --
 #    DFNS_OZM_INSTRUMENT_ID/ADMIN are already confirmed real values there,
 #    DFNS_ISSUER_WALLET_ID and DFNS_OZM_DECIMALS are still open (see that
 #    file's comments for why). Until these are set, transfer-cip56.js
 #    will 400 with a clear "not configured" error rather than fail
 #    silently -- that's expected, not a bug, until the wallet is funded.
+#
+#    DFNS_CANTON_VALIDATOR_ID specifically gates whether any DFNS Canton
+#    wallet this app creates is even usable -- see that var's comment in
+#    .env.local.example. If Settings > Developers > Canton validators in
+#    the DFNS Dashboard has nothing listed, this is the concrete answer to
+#    "is BYOV done?": not yet, until a validator (DFNS's shared one, or
+#    ozmium-devnet-1 connected as bring-your-own) is connected there.

@@ -95,6 +95,10 @@ services:
       DFNS_OZM_INSTRUMENT_ID: ${DFNS_OZM_INSTRUMENT_ID}
       DFNS_OZM_INSTRUMENT_ADMIN: ${DFNS_OZM_INSTRUMENT_ADMIN}
       DFNS_OZM_DECIMALS: ${DFNS_OZM_DECIMALS}
+      # Required for every DFNS Canton wallet this app creates to actually
+      # be usable -- see .env.local.example's DFNS_CANTON_VALIDATOR_ID
+      # comment for why (wallets are unusable until activated on one).
+      DFNS_CANTON_VALIDATOR_ID: ${DFNS_CANTON_VALIDATOR_ID}
     expose:
       - "3000"
 
