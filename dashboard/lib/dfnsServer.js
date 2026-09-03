@@ -92,6 +92,18 @@ export async function activateCantonWallet({ walletId }) {
   throw new Error(`Wallet ${walletId} still has no fully-prefixed address ~15s after activation -- it may still be registering on the validator, try again shortly`);
 }
 
+// Diagnostic helper -- the DFNS Dashboard's Canton Validators page (Settings
+// > Developers > Canton validators) lists validators by name but doesn't
+// surface their id (cv-xxxxx-xxxxx-...) anywhere in that UI, which is the
+// one thing DFNS_CANTON_VALIDATOR_ID actually needs. This hits the same
+// data DFNS's own "List Canton Validators" API returns, using the
+// credentials already configured server-side, so the id can be read off
+// directly instead of guessing at hidden dashboard affordances.
+export async function listCantonValidators() {
+  const result = await getDfnsClient().networks.listCantonValidators({ network: "canton-testnet" });
+  return result.items || [];
+}
+
 // Looks up a wallet by id -- mainly to resolve its on-chain `address`,
 // since Settlement.daml/AddressBookEntry only ever store the DFNS
 // walletId (a `wa-...` id), never the address itself. Re-fetching this
