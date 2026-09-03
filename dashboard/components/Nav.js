@@ -5,6 +5,7 @@ const LINKS = [
   { href: "/", label: "Operator" },
   { href: "/investor", label: "Investor" },
   { href: "/audit", label: "Audit trail" },
+  { href: "/verify", label: "Verify" },
 ];
 
 export default function Nav() {

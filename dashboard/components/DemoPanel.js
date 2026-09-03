@@ -12,6 +12,10 @@ import {
   submitCommand, getOrAllocateParty, knownCidsFor, findNewContracts, createDfnsWallet,
   getDfnsWallet, transferCip56Asset,
 } from "../lib/api";
+// Week 6 -- shared with pages/verify.js so both sides of "hash this
+// settlement the same way" (appending here, checking it there) live in
+// one place -- see lib/proofChain.js's own header comment.
+import { sha256HexOfUtf8, canonicalSettlementRecord } from "../lib/proofChain";
 
 // Strictly sequential within one scenario's run: exactly one button is
 // ever clickable at a time -- the next step that hasn't been done yet.
@@ -342,6 +346,35 @@ export default function DemoPanel() {
     log(`Issuer treasury DFNS wallet created — ${wallet.id} (${wallet.network}), address ${wallet.address}`);
   }
 
+  // Week 6 -- the hash-chained proof log (Ozmium.ProofLog) starts here,
+  // scoped to this scenario for now since it's the only path with a
+  // real settlement rail behind it to actually anchor (see Week 4).
+  // One log per issuer, found-or-created the same idempotent way
+  // stepSetup already reuses the registry/holdings -- re-running this
+  // step under a fresh browser/run just confirms what's already there
+  // instead of starting a second, competing chain.
+  async function stepCreateProofLog() {
+    const { ozmiumIssuer } = demo.parties;
+    const scenarioKey = demo.scenarioValue;
+    const known = await knownCidsFor("Ozmium.ProofLog:ProofLog");
+    let proofLogCid = known.size > 0 ? [...known][0] : undefined;
+    if (!proofLogCid) {
+      await submitCommand(ozmiumIssuer, [{
+        CreateCommand: {
+          templateId: `${PKG}:Ozmium.ProofLog:ProofLog`,
+          createArguments: { operator: ozmiumIssuer, lastHash: "", entryCount: "0" },
+        },
+      }]);
+      const [created] = await findNewContracts("Ozmium.ProofLog:ProofLog", known);
+      if (!created?.contractId) throw new Error("ProofLog created but couldn't be found afterward");
+      proofLogCid = created.contractId;
+      log(`Proof log created — hash-chained, tamper-evident settlement record for ${ozmiumIssuer}`);
+    } else {
+      log("Proof log already exists for this issuer — reusing it");
+    }
+    dispatch(setRunField({ scenario: scenarioKey, fields: { proofLogCid, proofEntryCids: run.proofEntryCids || [] } }));
+  }
+
   // Onboards both SAFT holders under ozmiumIssuer as fund -- separate
   // from (and not reusable with) the onboarding scenario's Alice/Bob
   // credentials, which are scoped to berlinSpv. A credential's approval
@@ -514,6 +547,46 @@ export default function DemoPanel() {
       },
     }));
     log(`${ordinal} settlement marked Paid`);
+
+    // Week 6 -- anchor this settlement into the proof log, same
+    // scoping as the DFNS transfer above (vesting scenario only, and
+    // only once "Create the proof log" has actually run -- run.proofLogCid
+    // is null otherwise, and this step just skips rather than failing,
+    // same "not every scenario has this wired up yet" reasoning as
+    // dfnsTransferId staying null for the waterfall/rent paths).
+    if (kind === "vesting" && run.proofLogCid) {
+      const paidArgs = paid.createArgument || {};
+      const record = canonicalSettlementRecord(paidArgs);
+      const payloadHash = await sha256HexOfUtf8(record);
+      // Disambiguates holder within a shared sourceEventRef -- multiple
+      // holders settle against the same underlying attestation/release,
+      // so sourceEventRef alone isn't a unique pointer per entry.
+      const eventRef = `${paidArgs.sourceEventRef}:${paidArgs.holder}`;
+
+      const knownLogs = await knownCidsFor("Ozmium.ProofLog:ProofLog");
+      const knownEntries = await knownCidsFor("Ozmium.ProofLog:ProofLogEntry");
+      await submitCommand(entitlementFund, [{
+        ExerciseCommand: {
+          templateId: `${PKG}:Ozmium.ProofLog:ProofLog`,
+          contractId: run.proofLogCid,
+          choice: "ProofLog_Append",
+          choiceArgument: { eventRef, payloadHash },
+        },
+      }]);
+      const [newLog] = await findNewContracts("Ozmium.ProofLog:ProofLog", knownLogs);
+      const [newEntry] = await findNewContracts("Ozmium.ProofLog:ProofLogEntry", knownEntries);
+      if (!newLog?.contractId || !newEntry?.contractId) {
+        throw new Error("ProofLog_Append succeeded but the new log/entry couldn't be found afterward");
+      }
+      dispatch(setRunField({
+        scenario: scenarioKey,
+        fields: {
+          proofLogCid: newLog.contractId,
+          proofEntryCids: [...(run.proofEntryCids || []), newEntry.contractId],
+        },
+      }));
+      log(`Proof log entry appended — sequence #${newEntry.createArgument?.sequenceNo}, entryHash ${String(newEntry.createArgument?.entryHash).slice(0, 16)}…`);
+    }
   }
 
   // Week 3: roll every settlement this run produced into an on-ledger
@@ -1005,6 +1078,7 @@ export default function DemoPanel() {
     allocate: stepAllocate,
     release: stepRelease,
     linkIssuerWallet: stepLinkIssuerWallet,
+    createProofLog: stepCreateProofLog,
     onboardHolders: stepOnboardHolders,
     linkHolderWallets: stepLinkHolderWallets,
     settle: stepSettle,

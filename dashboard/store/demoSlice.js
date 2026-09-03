@@ -34,6 +34,14 @@ function emptyRun() {
     allSettlementCids: null,
     reportDraftCid: null,
     reportCid: null,
+    // Week 6 -- Ozmium.ProofLog. proofLogCid is the running anchor
+    // (replaced on every append, same "consuming choice recreates the
+    // contract" shape as settlementCids above), proofEntryCids
+    // accumulates every entry this run has appended so far, in order --
+    // both only ever populated for the vesting scenario today (see
+    // stepCreateProofLog/markNextSettlementPaid in DemoPanel.js).
+    proofLogCid: null,
+    proofEntryCids: null,
     // Only used by the attestor-licensing scenario -- two separate
     // RevenueAttestations (before and after the revoke/renew cycle),
     // kept as distinct fields since both are alive across several
@@ -70,6 +78,7 @@ function emptyRun() {
     stepDone: {
       setup: false, attest: false, validate: false, distribute: false,
       entitlement: false, allocate: false, release: false,
+      createProofLog: false,
       settle: false, markPaid: false, markPaid2: false, markPaid3: false,
       attestFirst: false, validateFirst: false, revoke: false,
       attestSecond: false, validateRejected: false, renew: false,

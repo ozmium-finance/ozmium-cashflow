@@ -46,6 +46,21 @@ header .sub { color: var(--muted); font-size: 12px; }
   margin-left: auto;
   flex-wrap: wrap;
 }
+/* Generic fallback so a bare <button> outside .controls/#demoPanel
+   (e.g. the investor page's per-row "Download statement") still
+   matches the theme instead of falling back to browser chrome --
+   .controls button's own rule below still wins there via specificity. */
+button {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); color: var(--accent); }
+
 .controls input, .controls select {
   background: var(--panel);
   border: 1px solid var(--border);
@@ -192,6 +207,8 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 .pill { display: inline-block; font-size: 10px; padding: 2px 8px; border-radius: 999px; }
 .pill.paid { background: rgba(62, 207, 142, 0.15); color: var(--ok); }
 .pill.pending { background: rgba(232, 179, 57, 0.15); color: var(--warn); }
+.pill.ok { background: rgba(62, 207, 142, 0.15); color: var(--ok); }
+.pill.broken { background: rgba(239, 90, 111, 0.15); color: var(--err); }
 .mono { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); }
 .trace { color: var(--muted); font-size: 11px; }
 .trace.found { color: var(--accent); }
@@ -200,4 +217,17 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
 .toolbar input#search { flex: 1; min-width: 220px; background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 6px; font-size: 13px; }
 .toolbar select { background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 8px 10px; border-radius: 6px; font-size: 13px; }
+
+textarea {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: ui-monospace, monospace;
+  resize: vertical;
+  box-sizing: border-box;
+}
 .count { color: var(--muted); font-size: 12px; margin-bottom: 8px; }

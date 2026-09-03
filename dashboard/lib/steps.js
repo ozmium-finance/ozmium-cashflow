@@ -29,7 +29,13 @@ export const STEP_ORDER = {
     // and wallet-linked (their own credential relationship with
     // OzmiumIssuer, distinct from their berlinSpv one in the onboarding
     // scenario) -- all before settle needs any of it.
-    "linkIssuerWallet", "onboardHolders", "linkHolderWallets",
+    "linkIssuerWallet",
+    // Week 6 -- the hash-chained proof log starts here (Ozmium.ProofLog).
+    // Placed right after the treasury wallet, before onboarding/settle,
+    // so both pieces of "real settlement" infrastructure -- the payment
+    // rail and the tamper-evident record of it -- are set up together.
+    "createProofLog",
+    "onboardHolders", "linkHolderWallets",
     "settle", "markPaid", "markPaid2",
   ],
   licensing: [
@@ -71,6 +77,7 @@ const STEP_TEXT = {
   allocate: "Create allocation table (SAFT cap table + vesting schedule)",
   release: "Calculate vested entitlement (release)",
   linkIssuerWallet: "Link issuer treasury wallet (real DFNS wallet)",
+  createProofLog: "Create the proof log (hash-chained, tamper-evident settlement record)",
   onboardHolders: "Onboard both SAFT holders under OzmiumIssuer",
   linkHolderWallets: "Link both holders' Canton PartyIDs to real DFNS wallets",
   settle: "Settle",

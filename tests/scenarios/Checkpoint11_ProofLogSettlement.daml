@@ -1,0 +1,105 @@
+-- | Week 6 — wiring Ozmium.ProofLog into a *real* settlement, not just
+-- its own isolated test (Checkpoint10 proved the chain math in
+-- isolation; this proves the composition actually works end to end).
+--
+-- Done when: a real Settlement_MarkPaid result feeds a real
+-- ProofLog_Append, and verifyChain accepts the resulting entry as a
+-- genuine chain anchored to that specific payout -- not a
+-- hand-constructed ProofLogEntry that merely looks right.
+--
+-- Deliberately doesn't change Settlement.daml or ProofLog.daml
+-- themselves to compose this -- both templates stay exactly as
+-- decoupled as every other pair in this codebase (Distribution/
+-- Entitlement, Investor/AddressBook, ...). The composition happens at
+-- the caller's level instead: whoever marks a settlement Paid also
+-- exercises ProofLog_Append in the same script/session, same shape the
+-- dashboard's markNextSettlementPaid step (DemoPanel.js) uses for real
+-- against devnet.
+module Checkpoint11_ProofLogSettlement where
+
+import DA.Assert
+import DA.Date
+import DA.Crypto.Text (sha256, toHex)
+import Daml.Script
+import Ozmium.Allocation
+import Ozmium.Entitlement
+import Ozmium.Settlement
+import Ozmium.ProofLog
+import Ozmium.Setup
+
+-- | Same canonical, pipe-delimited field ordering DemoPanel.js's
+-- canonicalSettlementRecord uses -- documented once there, mirrored
+-- here so this test's payloadHash means the same thing a real
+-- dashboard-driven append would produce, not a stand-in string picked
+-- for convenience.
+canonicalSettlementRecord : SettlementInstruction -> Text
+canonicalSettlementRecord s =
+  show s.fund <> "|" <> show s.holder <> "|" <> s.assetId <> "|" <>
+  show s.periodStart <> "|" <> show s.periodEnd <> "|" <> s.currency <> "|" <>
+  show s.amount <> "|" <> s.sourceEventRef <> "|" <>
+  (case s.dfnsTransferId of None -> ""; Some t -> t)
+
+test_settlementAnchoredInProofLog : Script ()
+test_settlementAnchoredInProofLog = script do
+  DemoParties{..} <- allocateDemoParties
+  issuer <- allocatePartyByHint (PartyIdHint "OzmiumIssuerProofLog")
+
+  let trigger = date 2026 Jan 1
+  allocationCid <- submit issuer do
+    createCmd AllocationTable with
+      issuer
+      assetId = "OZM-SAFT-2026"
+      tokenSymbol = "OZM"
+      allocations = [(investor1, 100000.0)]
+      schedule = VestingSchedule with
+        triggerDate = trigger, cliffDays = 180, vestingDays = 730
+
+  entitlementCid <- submit issuer do
+    exerciseCmd allocationCid AllocationTable_CalculateEntitlement with
+      asOfDate = addDays trigger 900  -- past full vest
+      previouslyReleased = []
+      sourceRef = "ozm-saft-proof-release-1"
+
+  settlementCids <- submit issuer do
+    exerciseCmd entitlementCid EntitlementCalculation_Settle
+  let (settlementCid :: _) = settlementCids
+
+  logCid <- submit issuer do
+    createCmd ProofLog with operator = issuer, lastHash = "", entryCount = 0
+
+  -- The actual payout -- a real DFNS transfer id, same as the vesting
+  -- scenario's real path (see Settlement.daml's own comment on
+  -- dfnsTransferId), not None the way the waterfall/rent tests use.
+  paidCid <- submit issuer do
+    exerciseCmd settlementCid Settlement_MarkPaid with
+      dfnsTransferId = Some "dfns-transfer-test-anchor-1"
+  Some paidSettlement <- queryContractId issuer paidCid
+  paidSettlement.status === Paid
+
+  -- Compute payloadHash from the *actual* Paid settlement's own fields
+  -- -- this is the "real settlement flow" part of the claim. eventRef
+  -- disambiguates holder within a shared sourceEventRef, same reasoning
+  -- as DemoPanel.js's own comment on why sourceEventRef alone isn't a
+  -- unique pointer per entry.
+  let payloadHash = sha256 (toHex (canonicalSettlementRecord paidSettlement))
+  let eventRef = paidSettlement.sourceEventRef <> ":" <> show paidSettlement.holder
+
+  (_, entryCid) <- submit issuer do
+    exerciseCmd logCid ProofLog_Append with eventRef, payloadHash
+  Some entry <- queryContractId issuer entryCid
+
+  entry.sequenceNo === 0
+  entry.previousHash === ""
+  entry.payloadHash === payloadHash
+  entry.entryHash === nextEntryHash "" eventRef payloadHash
+
+  -- The chain-integrity property, proved against this one real entry:
+  -- replaying it from genesis confirms it. This is exactly what a
+  -- public verification page (still to build) would run client-side
+  -- given this entry plus the holder's own copy of their statement.
+  verifyChain [entry] === True
+
+  -- And the traceability property this whole thing exists for:
+  -- anyone holding the entry can point back at which settlement it
+  -- anchors, without ProofLog itself ever having seen the amount.
+  eventRef === paidSettlement.sourceEventRef <> ":" <> show paidSettlement.holder

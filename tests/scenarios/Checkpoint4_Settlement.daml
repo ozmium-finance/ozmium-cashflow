@@ -111,7 +111,9 @@ test_fullLifecycleEndToEnd = script do
   -- transfer on Canton itself, confirming on the other side). This
   -- waterfall/rent scenario doesn't have DFNS wallets wired up, so it
   -- passes None, same as it always effectively did before dfnsTransferId
-  -- existed -- see Checkpoint10 for the SAFT path that passes a real id.
+  -- existed -- see Checkpoint11_ProofLogSettlement for a Paid settlement
+  -- that carries a real transfer id, and the dashboard's vesting
+  -- scenario (DemoPanel.js) for where that happens against real DFNS.
   let (firstSettlementCid :: _) = settlementCids
   paidCid <- submit berlinSpv do
     exerciseCmd firstSettlementCid Settlement_MarkPaid with dfnsTransferId = None

@@ -6,6 +6,38 @@ import { apiFetch, fetchActiveContractsForParty, listOwnKnownPartyEntries } from
 import { money, num, partyLabel } from "../lib/format";
 import StatusBadge from "../components/StatusBadge";
 
+// Week 6 -- the fields here are exactly what pages/verify.js's
+// canonicalSettlementRecord (lib/proofChain.js) hashes, in the same
+// order, so a statement downloaded here and pasted into Verify
+// produces the identical payloadHash a real ProofLog_Append call used.
+// Deliberately just the fields verification actually needs, not the
+// full createArgument -- status isn't part of the hash (see
+// canonicalSettlementRecord's own comment), so it's included for the
+// holder's own reading but doesn't affect the check.
+function downloadStatement(r) {
+  const statement = {
+    fund: r.fund,
+    holder: r.holder,
+    assetId: r.assetId,
+    periodStart: r.periodStart,
+    periodEnd: r.periodEnd,
+    currency: r.currency,
+    amount: r.amount,
+    sourceEventRef: r.sourceEventRef,
+    dfnsTransferId: r.dfnsTransferId ?? null,
+    status: r.status,
+  };
+  const blob = new Blob([JSON.stringify(statement, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `ozmium-statement-${(r.sourceEventRef || "settlement").replace(/[^a-z0-9-]+/gi, "-")}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // One honest limitation carried over from the old dashboard/investor.html:
 // SettlementInstruction results here are genuinely private per investor
 // at the ledger level (filtersByParty, each contract has a single holder
@@ -167,19 +199,30 @@ export default function InvestorPage() {
           {settlements.length === 0 ? (
             <div className="empty">No settlements found for this party yet.</div>
           ) : (
-            <table>
-              <thead><tr><th>Asset</th><th>Amount</th><th>Status</th><th>Source</th></tr></thead>
-              <tbody>
-                {settlements.map((r, i) => (
-                  <tr key={i}>
-                    <td>{r.assetId}</td>
-                    <td>{money(r.amount, r.currency)}</td>
-                    <td><span className={`pill ${r.status === "Paid" ? "paid" : "pending"}`}>{r.status}</span></td>
-                    <td className="mono">{r.sourceEventRef || "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <>
+              <p className="trace">
+                Paid settlements from the OZM SAFT scenario are anchored in the hash-chained proof log --
+                download a statement below, then paste it into the <a href="/verify">Verify</a> page to
+                independently confirm it hasn&apos;t been altered and hasn&apos;t been dropped or
+                reordered, without asking anyone to just trust this dashboard.
+              </p>
+              <table>
+                <thead><tr><th>Asset</th><th>Amount</th><th>Status</th><th>Source</th><th></th></tr></thead>
+                <tbody>
+                  {settlements.map((r, i) => (
+                    <tr key={i}>
+                      <td>{r.assetId}</td>
+                      <td>{money(r.amount, r.currency)}</td>
+                      <td><span className={`pill ${r.status === "Paid" ? "paid" : "pending"}`}>{r.status}</span></td>
+                      <td className="mono">{r.sourceEventRef || "—"}</td>
+                      <td>
+                        <button type="button" onClick={() => downloadStatement(r)}>Download statement</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
           )}
         </section>
       </main>
