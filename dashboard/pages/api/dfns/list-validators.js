@@ -12,8 +12,8 @@ export default async function handler(req, res) {
     return;
   }
   try {
-    const validators = await listCantonValidators();
-    res.status(200).json({ validators });
+    const byNetwork = await listCantonValidators();
+    res.status(200).json({ validatorsByNetwork: byNetwork });
   } catch (err) {
     const message = err?.message || String(err);
     res.status(502).json({ cause: `DFNS validator lookup failed: ${message}` });

@@ -99,9 +99,18 @@ export async function activateCantonWallet({ walletId }) {
 // data DFNS's own "List Canton Validators" API returns, using the
 // credentials already configured server-side, so the id can be read off
 // directly instead of guessing at hidden dashboard affordances.
+// Queries all three Canton network variants -- canton-testnet is what
+// createCantonTestnetWallet actually uses, but the validator itself could
+// have been linked under a different one (e.g. canton-devnet), which
+// would itself explain an empty result and be worth knowing.
 export async function listCantonValidators() {
-  const result = await getDfnsClient().networks.listCantonValidators({ network: "canton-testnet" });
-  return result.items || [];
+  const networks = ["canton-testnet", "canton-devnet", "canton"];
+  const byNetwork = {};
+  for (const network of networks) {
+    const result = await getDfnsClient().networks.listCantonValidators({ network });
+    byNetwork[network] = result.items || [];
+  }
+  return byNetwork;
 }
 
 // Looks up a wallet by id -- mainly to resolve its on-chain `address`,
