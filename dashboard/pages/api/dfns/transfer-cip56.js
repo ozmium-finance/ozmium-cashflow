@@ -47,28 +47,25 @@ export default async function handler(req, res) {
     }
 
     // `amount` arrives as a human-readable decimal string straight off
-    // SettlementInstruction (e.g. "50000.0000000000"). Whether this needs
-    // scaling to a minimum-denomination integer at all is genuinely
-    // unconfirmed for Canton's Cip56 kind specifically -- DFNS's "amount
-    // in minimum denomination" wording on transferAsset is shared
-    // boilerplate across every chain kind in that union type (EVM, UTXO,
-    // ...), and OZM's own DA Registry Instrument Configuration has no
-    // decimals field at all to convert against -- Canton just uses
-    // Daml's native Decimal directly, unlike an EVM token's wei-style
-    // integer amounts. So: DFNS_OZM_DECIMALS=raw sends the literal
-    // decimal string through unscaled (the more likely-correct default
-    // for Cip56 given the above); set it to an actual integer only if
-    // testing shows DFNS truly wants a scaled minimum-denomination value
-    // for this instrument.
+    // SettlementInstruction (e.g. "50000.0000000000"). This DOES need
+    // scaling -- confirmed against DFNS's own published OpenAPI schema
+    // for transferAsset's Cip56 variant, not a guess anymore: `amount`
+    // is `type: string, pattern: ^\d+$`, digits only, no decimal point,
+    // "in minimum denomination" -- same wei-style integer convention as
+    // every other chain kind, not raw-Decimal-passthrough. A prior
+    // version of this route had a "raw" mode that sent the unscaled
+    // decimal string (e.g. "50000.0000000000") straight through; that
+    // always fails DFNS's own schema validation (the literal "."
+    // violates ^\d+$) and has been removed -- if you see "raw" in an
+    // old .env, replace it with the real decimals count.
     const decimalsRaw = process.env.DFNS_OZM_DECIMALS;
-    if (decimalsRaw === undefined || decimalsRaw === "") {
+    if (decimalsRaw === undefined || decimalsRaw === "" || Number.isNaN(Number(decimalsRaw))) {
       res.status(400).json({
-        cause: 'DFNS_OZM_DECIMALS isn\'t configured -- set it to "raw" to send the literal decimal amount unscaled (Canton/CIP-56 has no confirmed minimum-denomination concept for OZM), or to an integer decimals count if testing shows DFNS expects one',
+        cause: "DFNS_OZM_DECIMALS isn't configured to a real integer -- set it to OZM's actual CIP-56 minimum-denomination decimals count (see wherever OZM was registered/minted; Daml's own Decimal is scale 10, which is a reasonable first guess but not confirmed for the instrument itself)",
       });
       return;
     }
-    const isRaw = decimalsRaw.trim().toLowerCase() === "raw";
-    const transferAmount = isRaw ? String(amount) : toMinimumDenomination(amount, Number(decimalsRaw));
+    const transferAmount = toMinimumDenomination(amount, Number(decimalsRaw));
 
     const transfer = await transferCip56Asset({
       walletId: resolvedWalletId,
