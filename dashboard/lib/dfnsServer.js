@@ -47,6 +47,25 @@ export function getDfnsClient() {
 // wallet itself carries a durable, queryable link back to who it's for,
 // on top of whatever AddressBookEntry records on the Canton ledger side.
 export async function createCantonTestnetWallet({ name, externalId }) {
+  // Idempotent by (name, externalId) -- every "Link issuer/holder wallet"
+  // demo step always used to mint a brand-new DFNS wallet on every click,
+  // including retries after a failed step. DFNS plans cap the number of
+  // wallets per network (confirmed the hard way: "Network wallet limit
+  // reached (2) for CantonTestnet"), so re-running this demo a few times
+  // was silently burning through that cap. Reusing an existing wallet with
+  // the same (name, externalId) fixes that without changing the rotation
+  // scenario's behavior -- it deliberately passes a different name
+  // ("...-rotated") for the same externalId specifically to force a new
+  // wallet, and matching on both fields (not just externalId) preserves
+  // that.
+  const existing = await findCantonTestnetWallet({ name, externalId });
+  if (existing) {
+    if (existing.address && !existing.address.includes("::") && process.env.DFNS_CANTON_VALIDATOR_ID) {
+      return activateCantonWallet({ walletId: existing.id });
+    }
+    return existing;
+  }
+
   const wallet = await getDfnsClient().wallets.createWallet({
     body: {
       network: "CantonTestnet",
@@ -67,6 +86,25 @@ export async function createCantonTestnetWallet({ name, externalId }) {
     return activateCantonWallet({ walletId: wallet.id });
   }
   return wallet; // { id, network, address, status, ... } -- address has no prefix yet
+}
+
+// listWallets has no name/externalId filter server-side (only owner), so
+// this pages through the org's wallets and matches client-side. Fine for
+// this demo's wallet counts; would need real pagination-aware filtering
+// at any real scale.
+async function findCantonTestnetWallet({ name, externalId }) {
+  let paginationToken;
+  do {
+    const { items, nextPageToken } = await getDfnsClient().wallets.listWallets({
+      query: { limit: 100, paginationToken },
+    });
+    const match = (items || []).find(
+      (w) => w.network === "CantonTestnet" && w.name === name && w.externalId === externalId && w.status !== "Archived",
+    );
+    if (match) return match;
+    paginationToken = nextPageToken;
+  } while (paginationToken);
+  return null;
 }
 
 // Registers a wallet on DFNS_CANTON_VALIDATOR_ID (the "Activate Wallet"
