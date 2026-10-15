@@ -1,4 +1,4 @@
-# Ozmium Cashflow — Canton Mission Build
+# Ozmium Cashflow — Canton Native
 
 Milestone 1 deliverable: a working Daml prototype of Ozmium's
 programmable cashflow layer on Canton, showing that Canton can act as
